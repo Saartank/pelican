@@ -21,6 +21,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -94,14 +95,18 @@ type Match struct {
 }
 
 func configGet(cmd *cobra.Command, args []string) {
-	keys := viper.AllKeys()
+	rawConfig, err := param.UnmarshalConfig()
+	if err != nil {
+		fmt.Println("Error unmarshalling config:", err)
+		return
+	}
+
+	configValues := make(map[string]string)
+	extractConfigValues(rawConfig, "", configValues)
 
 	var matches []Match
 
-	for _, key := range keys {
-		value := viper.Get(key)
-		valueStr := fmt.Sprintf("%v", value)
-
+	for key, valueStr := range configValues {
 		highlightedKey := key
 		highlightedValue := valueStr
 		matchesFound := false
@@ -138,13 +143,56 @@ func configGet(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	// Sort the matches by the original keys (case-insensitive)
 	sort.Slice(matches, func(i, j int) bool {
 		return strings.ToLower(matches[i].OriginalKey) < strings.ToLower(matches[j].OriginalKey)
 	})
 
 	for _, match := range matches {
 		fmt.Printf("%s: %s\n", match.HighlightedKey, match.HighlightedValue)
+	}
+}
+
+// extractConfigValues recursively extracts key-value pairs from a nested struct
+func extractConfigValues(config interface{}, parentKey string, result map[string]string) {
+	v := reflect.ValueOf(config)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+
+	t := v.Type()
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		fieldValue := v.Field(i)
+
+		key := field.Tag.Get("mapstructure")
+		if key == "" {
+			key = strings.ToLower(field.Name)
+		}
+
+		if parentKey != "" {
+			key = parentKey + "." + key
+		}
+
+		// Handle different kinds of fields
+		switch fieldValue.Kind() {
+		case reflect.Struct:
+			extractConfigValues(fieldValue.Interface(), key, result)
+		case reflect.Ptr:
+			if !fieldValue.IsNil() {
+				extractConfigValues(fieldValue.Interface(), key, result)
+			}
+		case reflect.Slice, reflect.Array:
+			// Convert slice elements to strings
+			sliceValues := make([]string, fieldValue.Len())
+			for j := 0; j < fieldValue.Len(); j++ {
+				element := fieldValue.Index(j).Interface()
+				sliceValues[j] = fmt.Sprintf("%v", element)
+			}
+			result[key] = "[" + strings.Join(sliceValues, ", ") + "]"
+		default:
+			result[key] = fmt.Sprintf("%v", fieldValue.Interface())
+		}
 	}
 }
 
