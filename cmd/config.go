@@ -21,6 +21,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"reflect"
 	"sort"
 	"strings"
@@ -55,6 +57,12 @@ var (
 		Use:   "get",
 		Short: "Prints out all configuration variables and the values matching arguments",
 		Run:   configGet,
+	}
+
+	configManCmd = &cobra.Command{
+		Use:   "man",
+		Short: "Prints documentation for the config parmaeter matching best with the argument",
+		Run:   configMan,
 	}
 
 	format string
@@ -223,9 +231,174 @@ func highlightSubstring(s, substr string, colorAttr color.Attribute) string {
 	return result.String()
 }
 
+type ParameterDoc struct {
+	Name        string      `yaml:"name"`
+	Description string      `yaml:"description"`
+	Default     interface{} `yaml:"default"`
+	Components  []string    `yaml:"components"`
+	Type        string      `yaml:"type"`
+}
+
+func configMan(cmd *cobra.Command, args []string) {
+	if len(args) == 0 {
+		fmt.Println("Please provide a configuration parameter name.")
+		return
+	}
+	paramName := args[0]
+
+	parameters, err := parseParametersYAML("/workspaces/pelican/docs/parameters.yaml")
+	if err != nil {
+		fmt.Println("Error parsing parameters.yaml:", err)
+		return
+	}
+
+	var matchedParam *ParameterDoc
+	for _, param := range parameters {
+		if strings.EqualFold(param.Name, paramName) {
+			matchedParam = &param
+			break
+		}
+	}
+
+	if matchedParam == nil {
+		fmt.Printf("No documentation found for parameter: %s\n", paramName)
+		return
+	}
+
+	configValue, found := getConfigValueByName(matchedParam.Name)
+	if !found {
+		configValue = formatValue(matchedParam.Default)
+	}
+
+	labelColor := color.New(color.FgGreen).Add(color.Bold)
+	paramColor := color.New(color.FgCyan).Add(color.Bold)
+
+	fmt.Println()
+	fmt.Printf("%s %s\n", labelColor.Sprint("Parameter:"), paramColor.Sprint(matchedParam.Name))
+	fmt.Printf("%s %s\n", labelColor.Sprint("Type:"), matchedParam.Type)
+	fmt.Printf("%s %s\n", labelColor.Sprint("Default:"), formatValue(matchedParam.Default))
+	fmt.Printf("%s %s\n", labelColor.Sprint("Current Value:"), configValue)
+	fmt.Printf("%s\n\n", labelColor.Sprint("Description:"))
+	fmt.Println(indentText(matchedParam.Description, "  "))
+}
+
+func parseParametersYAML(filePath string) ([]ParameterDoc, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open parameters file: %v", err)
+	}
+	defer file.Close()
+
+	var parameters []ParameterDoc
+	decoder := yaml.NewDecoder(file)
+	for {
+		var param ParameterDoc
+		err := decoder.Decode(&param)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse parameters file: %v", err)
+		}
+		if param.Name != "" {
+			parameters = append(parameters, param)
+		}
+	}
+
+	return parameters, nil
+}
+
+func getConfigValueByName(paramName string) (string, bool) {
+	rawConfig, err := param.UnmarshalConfig()
+	if err != nil {
+		return "", false
+	}
+
+	value, found := getValueFromConfig(rawConfig, paramName)
+	if found {
+		rv := reflect.ValueOf(value)
+		if rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
+			var elements []string
+			for i := 0; i < rv.Len(); i++ {
+				elem := rv.Index(i).Interface()
+				elements = append(elements, fmt.Sprintf("%v", elem))
+			}
+			return "[" + strings.Join(elements, ", ") + "]", true
+		}
+		return fmt.Sprintf("%v", value), true
+	}
+	return "", false
+}
+
+func getValueFromConfig(config interface{}, paramName string) (interface{}, bool) {
+	v := reflect.ValueOf(config)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return nil, false
+	}
+
+	t := v.Type()
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		fieldValue := v.Field(i)
+
+		key := field.Tag.Get("mapstructure")
+		if key == "" {
+			key = field.Name
+		}
+
+		if strings.EqualFold(key, paramName) {
+			return fieldValue.Interface(), true
+		}
+
+		// Handle nested structs
+		if fieldValue.Kind() == reflect.Struct || (fieldValue.Kind() == reflect.Ptr && !fieldValue.IsNil()) {
+			value, found := getValueFromConfig(fieldValue.Interface(), paramName)
+			if found {
+				return value, true
+			}
+		}
+	}
+	return nil, false
+}
+
+// formatValue formats the value for display, handling slices and basic types
+func formatValue(value interface{}) string {
+	if value == nil {
+		return "none"
+	}
+
+	rv := reflect.ValueOf(value)
+	switch rv.Kind() {
+	case reflect.Slice, reflect.Array:
+		var elements []string
+		for i := 0; i < rv.Len(); i++ {
+			elem := rv.Index(i).Interface()
+			elements = append(elements, fmt.Sprintf("%v", elem))
+		}
+		return "[" + strings.Join(elements, ", ") + "]"
+	case reflect.String:
+		return fmt.Sprintf("%s", value)
+	default:
+		return fmt.Sprintf("%v", value)
+	}
+}
+
+// indentText indents each line of the text with the given prefix
+func indentText(text, prefix string) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		lines[i] = prefix + line
+	}
+	return strings.Join(lines, "\n")
+}
+
 func init() {
 	configCmd.AddCommand(configTestCmd)
 	configCmd.AddCommand(configDumpCmd)
 	configCmd.AddCommand(configGetCmd)
+	configCmd.AddCommand(configManCmd)
 	configDumpCmd.Flags().StringVarP(&format, "format", "o", "yaml", "Output format (yaml or json)")
 }
