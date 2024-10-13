@@ -161,7 +161,7 @@ func configGet(cmd *cobra.Command, args []string) {
 	}
 }
 
-// extractConfigValues recursively extracts key-value pairs from a nested struct
+// extractConfigValues recursively extracts key-value pairs from a nested struct and returns a flattened map
 func extractConfigValues(config interface{}, parentKey string, result map[string]string) {
 	v := reflect.ValueOf(config)
 	if v.Kind() == reflect.Ptr {
@@ -239,12 +239,6 @@ func configMan(cmd *cobra.Command, args []string) {
 	}
 	paramName := args[0]
 
-	// parameters, err := parseParametersYAML()
-	// if err != nil {
-	// 	fmt.Println("Error parsing parameters.yaml:", err)
-	// 	return
-	// }
-
 	var matchedParam *docs.ParameterDoc
 	for _, param := range docs.ParsedParameters {
 		if strings.EqualFold(param.Name, paramName) {
@@ -258,11 +252,6 @@ func configMan(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	configValue, found := getConfigValueByName(matchedParam.Name)
-	if !found {
-		configValue = formatValue(matchedParam.Default)
-	}
-
 	labelColor := color.New(color.FgGreen).Add(color.Bold)
 	paramColor := color.New(color.FgCyan).Add(color.Bold)
 
@@ -270,68 +259,20 @@ func configMan(cmd *cobra.Command, args []string) {
 	fmt.Printf("%s %s\n", labelColor.Sprint("Parameter:"), paramColor.Sprint(matchedParam.Name))
 	fmt.Printf("%s %s\n", labelColor.Sprint("Type:"), matchedParam.Type)
 	fmt.Printf("%s %s\n", labelColor.Sprint("Default:"), formatValue(matchedParam.Default))
-	fmt.Printf("%s %s\n", labelColor.Sprint("Current Value:"), configValue)
 	fmt.Printf("%s\n\n", labelColor.Sprint("Description:"))
 	fmt.Println(indentText(matchedParam.Description, "  "))
 }
 
-func getConfigValueByName(paramName string) (string, bool) {
-	rawConfig, err := param.UnmarshalConfig()
-	if err != nil {
-		return "", false
-	}
+// func getCaseInsensitiveValueFromMap(m map[string]string, key string) (string, bool) {
+// 	lowerKey := strings.ToLower(key)
+// 	for k, v := range m {
+// 		if strings.ToLower(k) == lowerKey {
+// 			return v, true
+// 		}
+// 	}
+// 	return "", false
+// }
 
-	value, found := getValueFromConfig(rawConfig, paramName)
-	if found {
-		rv := reflect.ValueOf(value)
-		if rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
-			var elements []string
-			for i := 0; i < rv.Len(); i++ {
-				elem := rv.Index(i).Interface()
-				elements = append(elements, fmt.Sprintf("%v", elem))
-			}
-			return "[" + strings.Join(elements, ", ") + "]", true
-		}
-		return fmt.Sprintf("%v", value), true
-	}
-	return "", false
-}
-
-func getValueFromConfig(config interface{}, paramName string) (interface{}, bool) {
-	v := reflect.ValueOf(config)
-	if v.Kind() == reflect.Ptr {
-		v = v.Elem()
-	}
-	if v.Kind() != reflect.Struct {
-		return nil, false
-	}
-
-	t := v.Type()
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		fieldValue := v.Field(i)
-
-		key := field.Tag.Get("mapstructure")
-		if key == "" {
-			key = field.Name
-		}
-
-		if strings.EqualFold(key, paramName) {
-			return fieldValue.Interface(), true
-		}
-
-		// Handle nested structs
-		if fieldValue.Kind() == reflect.Struct || (fieldValue.Kind() == reflect.Ptr && !fieldValue.IsNil()) {
-			value, found := getValueFromConfig(fieldValue.Interface(), paramName)
-			if found {
-				return value, true
-			}
-		}
-	}
-	return nil, false
-}
-
-// formatValue formats the value for display, handling slices and basic types
 func formatValue(value interface{}) string {
 	if value == nil {
 		return "none"
