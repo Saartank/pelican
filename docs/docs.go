@@ -5,12 +5,13 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
 var (
-	ParsedParameters []ParameterDoc
+	ParsedParameters map[string]*ParameterDoc
 	//go:embed parameters.yaml
 	parametersYaml []byte
 )
@@ -19,8 +20,11 @@ type ParameterDoc struct {
 	Name        string      `yaml:"name"`
 	Description string      `yaml:"description"`
 	Default     interface{} `yaml:"default"`
-	Components  []string    `yaml:"components"`
 	Type        string      `yaml:"type"`
+	Components  []string    `yaml:"components"`
+	Deprecated  bool        `yaml:"deprecated"`
+	Hidden      bool        `yaml:"hidden"`
+	Tags        []string    // Populated based on conditions
 }
 
 func init() {
@@ -31,11 +35,11 @@ func init() {
 	}
 }
 
-func parseParametersYAML() ([]ParameterDoc, error) {
+func parseParametersYAML() (map[string]*ParameterDoc, error) {
 
 	reader := bytes.NewReader(parametersYaml)
 
-	var parameters []ParameterDoc
+	parameters := make(map[string]*ParameterDoc)
 	decoder := yaml.NewDecoder(reader)
 	for {
 		var param ParameterDoc
@@ -47,7 +51,25 @@ func parseParametersYAML() ([]ParameterDoc, error) {
 			return nil, fmt.Errorf("failed to parse parameters file: %v", err)
 		}
 		if param.Name != "" {
-			parameters = append(parameters, param)
+			param.Tags = []string{}
+
+			// Handle ["*"] in Components
+			componentsToAdd := param.Components
+			if len(param.Components) == 1 && param.Components[0] == "*" {
+				componentsToAdd = []string{"origin", "cache", "registry", "director"}
+			}
+
+			param.Tags = append(param.Tags, componentsToAdd...)
+
+			if param.Hidden {
+				param.Tags = append(param.Tags, "hidden")
+			}
+			if param.Deprecated {
+				param.Tags = append(param.Tags, "deprecated")
+			}
+
+			key := strings.ToLower(param.Name)
+			parameters[key] = &param
 		}
 	}
 

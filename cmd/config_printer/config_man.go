@@ -17,15 +17,9 @@ func configMan(cmd *cobra.Command, args []string) {
 	}
 	paramName := args[0]
 
-	var matchedParam *docs.ParameterDoc
-	for _, param := range docs.ParsedParameters {
-		if strings.EqualFold(param.Name, paramName) {
-			matchedParam = &param
-			break
-		}
-	}
+	matchedParam, exists := docs.ParsedParameters[strings.ToLower(paramName)]
 
-	if matchedParam == nil {
+	if !exists {
 		fmt.Printf("No documentation found for parameter: %s\n", paramName)
 		return
 	}
@@ -37,6 +31,7 @@ func configMan(cmd *cobra.Command, args []string) {
 	fmt.Printf("%s %s\n", labelColor.Sprint("Parameter:"), paramColor.Sprint(matchedParam.Name))
 	fmt.Printf("%s %s\n", labelColor.Sprint("Type:"), matchedParam.Type)
 	fmt.Printf("%s %s\n", labelColor.Sprint("Default:"), formatValue(matchedParam.Default))
+	fmt.Printf("%s %s\n", labelColor.Sprint("Tags:"), formatValue(matchedParam.Tags))
 	fmt.Printf("%s\n\n", labelColor.Sprint("Description:"))
 	fmt.Println(indentText(matchedParam.Description, "  "))
 }
