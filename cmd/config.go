@@ -21,8 +21,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io"
-	"os"
 	"reflect"
 	"sort"
 	"strings"
@@ -32,7 +30,10 @@ import (
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
 
+	"github.com/pelicanplatform/pelican/docs"
 	"github.com/pelicanplatform/pelican/param"
+
+	_ "embed"
 )
 
 var (
@@ -231,14 +232,6 @@ func highlightSubstring(s, substr string, colorAttr color.Attribute) string {
 	return result.String()
 }
 
-type ParameterDoc struct {
-	Name        string      `yaml:"name"`
-	Description string      `yaml:"description"`
-	Default     interface{} `yaml:"default"`
-	Components  []string    `yaml:"components"`
-	Type        string      `yaml:"type"`
-}
-
 func configMan(cmd *cobra.Command, args []string) {
 	if len(args) == 0 {
 		fmt.Println("Please provide a configuration parameter name.")
@@ -246,14 +239,14 @@ func configMan(cmd *cobra.Command, args []string) {
 	}
 	paramName := args[0]
 
-	parameters, err := parseParametersYAML("/workspaces/pelican/docs/parameters.yaml")
-	if err != nil {
-		fmt.Println("Error parsing parameters.yaml:", err)
-		return
-	}
+	// parameters, err := parseParametersYAML()
+	// if err != nil {
+	// 	fmt.Println("Error parsing parameters.yaml:", err)
+	// 	return
+	// }
 
-	var matchedParam *ParameterDoc
-	for _, param := range parameters {
+	var matchedParam *docs.ParameterDoc
+	for _, param := range docs.ParsedParameters {
 		if strings.EqualFold(param.Name, paramName) {
 			matchedParam = &param
 			break
@@ -280,32 +273,6 @@ func configMan(cmd *cobra.Command, args []string) {
 	fmt.Printf("%s %s\n", labelColor.Sprint("Current Value:"), configValue)
 	fmt.Printf("%s\n\n", labelColor.Sprint("Description:"))
 	fmt.Println(indentText(matchedParam.Description, "  "))
-}
-
-func parseParametersYAML(filePath string) ([]ParameterDoc, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open parameters file: %v", err)
-	}
-	defer file.Close()
-
-	var parameters []ParameterDoc
-	decoder := yaml.NewDecoder(file)
-	for {
-		var param ParameterDoc
-		err := decoder.Decode(&param)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse parameters file: %v", err)
-		}
-		if param.Name != "" {
-			parameters = append(parameters, param)
-		}
-	}
-
-	return parameters, nil
 }
 
 func getConfigValueByName(paramName string) (string, bool) {
