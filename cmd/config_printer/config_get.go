@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/fatih/color"
+	"github.com/pelicanplatform/pelican/docs"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/spf13/cobra"
 )
@@ -34,30 +35,46 @@ func configGet(cmd *cobra.Command, args []string) {
 		highlightedValue := valueStr
 		matchesFound := false
 
-		if len(args) == 0 {
-			matchesFound = true
-		} else {
-			for _, arg := range args {
-				argLower := strings.ToLower(arg)
-
-				if strings.Contains(strings.ToLower(key), argLower) {
-					highlightedKey = highlightSubstring(key, arg, color.FgYellow)
-					matchesFound = true
+		tagsPresent := true
+		for _, tag := range tags {
+			docParam, exists := docs.ParsedParameters[strings.ToLower(key)]
+			if exists {
+				_, tagExists := docParam.Tags[strings.ToLower(tag)]
+				if !tagExists {
+					tagsPresent = false
 				}
-
-				if strings.Contains(strings.ToLower(valueStr), argLower) {
-					highlightedValue = highlightSubstring(valueStr, arg, color.FgYellow)
-					matchesFound = true
-				}
+			} else {
+				tagsPresent = false
 			}
 		}
 
-		if matchesFound {
-			matches = append(matches, Match{
-				OriginalKey:      key,
-				HighlightedKey:   highlightedKey,
-				HighlightedValue: highlightedValue,
-			})
+		if tagsPresent {
+
+			if len(args) == 0 {
+				matchesFound = true
+			} else {
+				for _, arg := range args {
+					argLower := strings.ToLower(arg)
+
+					if strings.Contains(strings.ToLower(key), argLower) {
+						highlightedKey = highlightSubstring(key, arg, color.FgYellow)
+						matchesFound = true
+					}
+
+					if strings.Contains(strings.ToLower(valueStr), argLower) {
+						highlightedValue = highlightSubstring(valueStr, arg, color.FgYellow)
+						matchesFound = true
+					}
+				}
+			}
+
+			if matchesFound {
+				matches = append(matches, Match{
+					OriginalKey:      key,
+					HighlightedKey:   highlightedKey,
+					HighlightedValue: highlightedValue,
+				})
+			}
 		}
 	}
 

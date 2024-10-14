@@ -17,14 +17,14 @@ var (
 )
 
 type ParameterDoc struct {
-	Name        string      `yaml:"name"`
-	Description string      `yaml:"description"`
-	Default     interface{} `yaml:"default"`
-	Type        string      `yaml:"type"`
-	Components  []string    `yaml:"components"`
-	Deprecated  bool        `yaml:"deprecated"`
-	Hidden      bool        `yaml:"hidden"`
-	Tags        []string    // Populated based on conditions
+	Name        string              `yaml:"name"`
+	Description string              `yaml:"description"`
+	Default     interface{}         `yaml:"default"`
+	Type        string              `yaml:"type"`
+	Components  []string            `yaml:"components"`
+	Deprecated  bool                `yaml:"deprecated"`
+	Hidden      bool                `yaml:"hidden"`
+	Tags        map[string]struct{} // Populated based on conditions
 }
 
 func init() {
@@ -51,7 +51,7 @@ func parseParametersYAML() (map[string]*ParameterDoc, error) {
 			return nil, fmt.Errorf("failed to parse parameters file: %v", err)
 		}
 		if param.Name != "" {
-			param.Tags = []string{}
+			param.Tags = make(map[string]struct{})
 
 			// Handle ["*"] in Components
 			componentsToAdd := param.Components
@@ -59,13 +59,15 @@ func parseParametersYAML() (map[string]*ParameterDoc, error) {
 				componentsToAdd = []string{"origin", "cache", "registry", "director"}
 			}
 
-			param.Tags = append(param.Tags, componentsToAdd...)
+			for _, component := range componentsToAdd {
+				param.Tags[strings.ToLower(component)] = struct{}{}
+			}
 
 			if param.Hidden {
-				param.Tags = append(param.Tags, "hidden")
+				param.Tags["hidden"] = struct{}{}
 			}
 			if param.Deprecated {
-				param.Tags = append(param.Tags, "deprecated")
+				param.Tags["deprecated"] = struct{}{}
 			}
 
 			key := strings.ToLower(param.Name)

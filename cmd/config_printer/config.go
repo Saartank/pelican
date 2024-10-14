@@ -57,6 +57,7 @@ var (
 	}
 
 	format string
+	tags   []string
 )
 
 func configTest( /*cmd*/ *cobra.Command /*args*/, []string) {
@@ -68,5 +69,7 @@ func init() {
 	ConfigCmd.AddCommand(configDumpCmd)
 	ConfigCmd.AddCommand(configGetCmd)
 	ConfigCmd.AddCommand(configManCmd)
+
 	configDumpCmd.Flags().StringVarP(&format, "format", "o", "yaml", "Output format (yaml or json)")
+	configGetCmd.Flags().StringArrayVarP(&tags, "tag", "t", []string{}, "Specify tags to filter output of config get (-t hidden -t origin)")
 }

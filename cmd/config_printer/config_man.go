@@ -50,6 +50,18 @@ func formatValue(value interface{}) string {
 			elements = append(elements, fmt.Sprintf("%v", elem))
 		}
 		return "[" + strings.Join(elements, ", ") + "]"
+
+	case reflect.Map:
+		// Handle map[string]struct{} as a set
+		if rv.Type().Key().Kind() == reflect.String && rv.Type().Elem().Kind() == reflect.Struct {
+			var keys []string
+			for _, key := range rv.MapKeys() {
+				keys = append(keys, key.String())
+			}
+			return "[" + strings.Join(keys, ", ") + "]"
+		}
+		// Generic map handling (if needed)
+		return fmt.Sprintf("%v", value)
 	case reflect.String:
 		return fmt.Sprintf("%s", value)
 	default:
