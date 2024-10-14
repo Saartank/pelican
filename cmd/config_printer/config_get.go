@@ -105,10 +105,7 @@ func extractConfigValues(config interface{}, parentKey string, result map[string
 		field := t.Field(i)
 		fieldValue := v.Field(i)
 
-		key := field.Tag.Get("mapstructure")
-		if key == "" {
-			key = strings.ToLower(field.Name)
-		}
+		key := strings.ToLower(field.Name)
 
 		if parentKey != "" {
 			key = parentKey + "." + key
