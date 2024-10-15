@@ -51,9 +51,10 @@ var (
 	}
 
 	configManCmd = &cobra.Command{
-		Use:   "man",
-		Short: "Prints documentation for the config parmaeter matching best with the argument",
-		Run:   configMan,
+		Use:     "describe",
+		Short:   "Prints documentation for the config parameter matching best with the argument",
+		Aliases: []string{"desc", "man", "doc"},
+		Run:     configMan,
 	}
 
 	format string
