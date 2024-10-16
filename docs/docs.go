@@ -53,8 +53,8 @@ func parseParametersYAML() (map[string]*ParameterDoc, error) {
 		if param.Name != "" {
 			param.Tags = make(map[string]struct{})
 
-			// Handle ["*"] in Components
 			componentsToAdd := param.Components
+			// Handle ["*"] in Components
 			if len(param.Components) == 1 && param.Components[0] == "*" {
 				componentsToAdd = []string{"origin", "cache", "registry", "director"}
 				param.Components = []string{"origin", "cache", "registry", "director"}
@@ -62,13 +62,6 @@ func parseParametersYAML() (map[string]*ParameterDoc, error) {
 
 			for _, component := range componentsToAdd {
 				param.Tags[strings.ToLower(component)] = struct{}{}
-			}
-
-			if param.Hidden {
-				param.Tags["hidden"] = struct{}{}
-			}
-			if param.Deprecated {
-				param.Tags["deprecated"] = struct{}{}
 			}
 
 			key := strings.ToLower(param.Name)

@@ -130,19 +130,27 @@ func extractConfigValues(config interface{}, parentKey string, result map[string
 			if !fieldValue.IsNil() {
 				extractConfigValues(fieldValue.Interface(), key, result)
 			}
-		case reflect.Slice, reflect.Array:
-			// Convert slice elements to strings
-			sliceValues := make([]string, fieldValue.Len())
-			for j := 0; j < fieldValue.Len(); j++ {
-				element := fieldValue.Index(j).Interface()
-				sliceValues[j] = fmt.Sprintf("%v", element)
-			}
-			result[key] = "[" + strings.Join(sliceValues, ", ") + "]"
-		case reflect.String:
-			result[key] = fmt.Sprintf("\"%s\"", fieldValue.Interface())
+
 		default:
-			result[key] = fmt.Sprintf("%v", fieldValue.Interface())
+			result[key] = formatFieldValue(fieldValue)
 		}
+	}
+}
+
+func formatFieldValue(fieldValue reflect.Value) string {
+	switch fieldValue.Kind() {
+	case reflect.Slice, reflect.Array:
+		sliceValues := make([]string, fieldValue.Len())
+		for j := 0; j < fieldValue.Len(); j++ {
+			element := fieldValue.Index(j).Interface()
+			sliceValues[j] = fmt.Sprintf("%v", element)
+		}
+		return "[" + strings.Join(sliceValues, ", ") + "]"
+	case reflect.String:
+		return fmt.Sprintf("\"%s\"", fieldValue.Interface())
+
+	default:
+		return fmt.Sprintf("%v", fieldValue.Interface())
 	}
 }
 
