@@ -8,8 +8,8 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/pelicanplatform/pelican/docs"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 type Match struct {
@@ -19,11 +19,7 @@ type Match struct {
 }
 
 func configGet(cmd *cobra.Command, args []string) {
-	rawConfig, err := param.UnmarshalConfig()
-	if err != nil {
-		fmt.Println("Error unmarshalling config:", err)
-		return
-	}
+	rawConfig := PopulateConfig(viper.GetViper())
 
 	configValues := make(map[string]string)
 	extractConfigValues(rawConfig, "", configValues)

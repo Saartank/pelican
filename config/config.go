@@ -178,6 +178,8 @@ func init() {
 	translator = &trans
 
 	validate = validator.New(validator.WithRequiredStructEnabled())
+	InitConfig()
+
 }
 
 // setEnabledServer sets the global variable config.EnabledServers to include newServers.
@@ -1524,4 +1526,447 @@ func ResetConfig() {
 	ResetClientInitialized()
 
 	// other than what's above, resetting Origin exports will be done by ResetTestState() in server_utils pkg
+}
+
+func InitServerCustom(v *viper.Viper) error {
+	configDir := v.GetString("ConfigDir")
+
+	v.SetDefault("Server.WebConfigFile", filepath.Join(configDir, "web-config.yaml"))
+
+	v.SetConfigType("yaml")
+	v.SetDefault("Server.TLSCertificate", filepath.Join(configDir, "certificates", "tls.crt"))
+	v.SetDefault("Server.TLSKey", filepath.Join(configDir, "certificates", "tls.key"))
+	v.SetDefault("Server.TLSCAKey", filepath.Join(configDir, "certificates", "tlsca.key"))
+	v.SetDefault("Server.SessionSecretFile", filepath.Join(configDir, "session-secret"))
+	v.SetDefault("Xrootd.RobotsTxtFile", filepath.Join(configDir, "robots.txt"))
+	v.SetDefault("Xrootd.ScitokensConfig", filepath.Join(configDir, "xrootd", "scitokens.cfg"))
+	v.SetDefault("Xrootd.Authfile", filepath.Join(configDir, "xrootd", "authfile"))
+	v.SetDefault("Xrootd.MacaroonsKeyFile", filepath.Join(configDir, "macaroons-secret"))
+	v.SetDefault("IssuerKey", filepath.Join(configDir, "issuer.jwk"))
+	v.SetDefault("Server.UIPasswordFile", filepath.Join(configDir, "server-web-passwd"))
+	v.SetDefault("Server.UIActivationCodeFile", filepath.Join(configDir, "server-web-activation-code"))
+	v.SetDefault("OIDC.ClientIDFile", filepath.Join(configDir, "oidc-client-id"))
+	v.SetDefault("OIDC.ClientSecretFile", filepath.Join(configDir, "oidc-client-secret"))
+	v.SetDefault("Server.WebConfigFile", filepath.Join(configDir, "web-config.yaml"))
+	v.SetDefault("Cache.ExportLocation", "/")
+	v.SetDefault("Registry.RequireKeyChaining", true)
+
+	// Set up the default S3 URL style to be path-style here as opposed to in the defaults.yaml becase
+	// we want to be able to check if this is user-provided (which we can't do for defaults.yaml)
+
+	v.SetDefault("Origin.S3UrlStyle", "path")
+
+	if v.IsSet("Cache.DataLocation") {
+		log.Warningf("Deprecated configuration key %s is set. Please migrate to use %s instead", "Cache.DataLocation", "Cache.LocalRoot")
+		log.Warningf("Will attempt to use the value of %s as default for %s", "Cache.DataLocation", "Cache.LocalRoot")
+	}
+
+	if IsRootExecution() {
+		v.SetDefault("Origin.RunLocation", filepath.Join("/run", "pelican", "xrootd", "origin"))
+		v.SetDefault("Cache.RunLocation", filepath.Join("/run", "pelican", "xrootd", "cache"))
+
+		v.SetDefault("Cache.DataLocation", "/run/pelican/cache")
+		v.SetDefault("Cache.LocalRoot", v.GetString("Cache.DataLocation"))
+
+		if v.IsSet("Cache.DataLocation") {
+			v.SetDefault("Cache.DataLocations", []string{filepath.Join(v.GetString("Cache.DataLocation"), "data")})
+			v.SetDefault("Cache.MetaLocations", []string{filepath.Join(v.GetString("Cache.DataLocation"), "meta")})
+		} else {
+			v.SetDefault("Cache.DataLocations", []string{"/run/pelican/cache/data"})
+			v.SetDefault("Cache.MetaLocations", []string{"/run/pelican/cache/meta"})
+		}
+
+		v.SetDefault("LocalCache.RunLocation", filepath.Join("/run", "pelican", "localcache"))
+
+		v.SetDefault("Origin.Multiuser", true)
+		v.SetDefault("Origin.DbLocation", "/var/lib/pelican/origin.sqlite")
+		v.SetDefault("Director.GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
+		v.SetDefault("Registry.DbLocation", "/var/lib/pelican/registry.sqlite")
+		v.SetDefault("Lotman.DbLocation", "/var/lib/pelican")
+		v.SetDefault("Monitoring.DataLocation", "/var/lib/pelican/monitoring/data")
+		v.SetDefault("Shoveler.QueueDirectory", "/var/spool/pelican/shoveler/queue")
+		v.SetDefault("Shoveler.AMQPTokenLocation", "/etc/pelican/shoveler-token")
+		v.SetDefault("Origin.GlobusConfigLocation", filepath.Join("/run", "pelican", "xrootd", "origin", "globus"))
+	} else {
+		v.SetDefault("Origin.DbLocation", filepath.Join(configDir, "origin.sqlite"))
+		v.SetDefault("Director.GeoIPLocation", filepath.Join(configDir, "maxmind", "GeoLite2-City.mmdb"))
+		v.SetDefault("Registry.DbLocation", filepath.Join(configDir, "ns-registry.sqlite"))
+		v.SetDefault("Lotman.DbLocation", configDir)
+		v.SetDefault("Monitoring.DataLocation", filepath.Join(configDir, "monitoring/data"))
+		v.SetDefault("Shoveler.QueueDirectory", filepath.Join(configDir, "shoveler/queue"))
+		v.SetDefault("Shoveler.AMQPTokenLocation", filepath.Join(configDir, "shoveler-token"))
+
+		var runtimeDir string
+		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
+			runtimeDir = filepath.Join(userRuntimeDir, "pelican")
+			v.Set("RuntimeDir", runtimeDir)
+		} else {
+			runtimeDir = ""
+			v.Set("RuntimeDir", runtimeDir)
+		}
+
+		v.SetDefault("Origin.GlobusConfigLocation", filepath.Join(runtimeDir, "xrootd", "origin", "globus"))
+		v.SetDefault("Cache.DataLocation", filepath.Join(runtimeDir, "cache"))
+		v.SetDefault("Cache.LocalRoot", v.GetString("Cache.DataLocation"))
+
+		if v.IsSet("Cache.DataLocation") {
+			v.SetDefault("Cache.DataLocations", []string{filepath.Join(v.GetString("Cache.DataLocation"), "data")})
+			v.SetDefault("Cache.MetaLocations", []string{filepath.Join(v.GetString("Cache.DataLocation"), "meta")})
+		} else {
+			v.SetDefault("Cache.DataLocations", []string{filepath.Join(runtimeDir, "pelican/cache/data")})
+			v.SetDefault("Cache.MetaLocations", []string{filepath.Join(runtimeDir, "pelican/cache/meta")})
+		}
+		v.SetDefault("LocalCache.RunLocation", filepath.Join(runtimeDir, "cache"))
+		v.SetDefault("Origin.Multiuser", false)
+	}
+
+	fcRunLocation := v.GetString("LocalCache.RunLocation")
+	v.SetDefault("LocalCache.Socket", filepath.Join(fcRunLocation, "cache.sock"))
+	v.SetDefault("LocalCache.DataLocation", filepath.Join(fcRunLocation, "cache"))
+
+	v.SetDefault("Server.TLSCACertificateFile", filepath.Join(configDir, "certificates", "tlsca.pem"))
+	v.SetDefault("Xrootd.Sitename", v.GetString("Server.Hostname"))
+
+	cachePort := v.GetInt("Cache.Port")
+	originPort := v.GetInt("Origin.Port")
+	xrootdPort := v.GetInt("Xrootd.Port")
+	xrootdPortIsSet := v.IsSet("Xrootd.Port")
+	cacheFallbackToXrootd := false
+	originFallbackToXrootd := false
+
+	if !v.IsSet("Cache.Port") {
+		if xrootdPortIsSet {
+			cacheFallbackToXrootd = true
+			cachePort = xrootdPort
+		} else {
+			return errors.New("the configuration Cache.Port is not set but the Cache module is enabled. Please set Cache.Port")
+		}
+	}
+	if !v.IsSet("Origin.Port") {
+		if xrootdPortIsSet {
+			originFallbackToXrootd = true
+			originPort = xrootdPort
+		} else {
+			return errors.New("the configuration Origin.Port is not set but the Origin module is enabled. Please set Origin.Port")
+		}
+	}
+	if cacheFallbackToXrootd && originFallbackToXrootd {
+		return errors.New("neither Cache.Port nor Origin.Port is set but both modules are enabled. Please set both variables")
+	}
+
+	v.Set("Origin.CalculatedPort", strconv.Itoa(originPort))
+	if originPort == 0 {
+		v.Set("Origin.CalculatedPort", "any")
+	}
+	v.Set("Cache.CalculatedPort", strconv.Itoa(cachePort))
+	if cachePort == 0 {
+		v.Set("Cache.CalculatedPort", "any")
+	}
+	v.Set("Origin.Port", originPort)
+	v.Set("Cache.Port", cachePort)
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		return err
+	}
+	v.SetDefault("Server.Hostname", hostname)
+	hostname = v.GetString("Server.Hostname")
+	if originPort != 443 {
+		v.SetDefault("Origin.Url", fmt.Sprintf("https://%v:%v", hostname, originPort))
+	} else {
+		v.SetDefault("Origin.Url", fmt.Sprintf("https://%v", hostname))
+	}
+
+	if cachePort != 443 {
+		v.SetDefault("Cache.Url", fmt.Sprintf("https://%v:%v", hostname, cachePort))
+	} else {
+		v.SetDefault("Cache.Url", fmt.Sprintf("https://%v", hostname))
+	}
+
+	ost := v.GetString("Origin.StorageType")
+	switch ost {
+	case "posix":
+		v.SetDefault("Origin.SelfTest", true)
+		v.SetDefault("Origin.DirectorTest", true)
+	default:
+		// Other storage types handled elsewhere due to side effects
+	}
+
+	if ost != "posix" {
+		if v.GetBool("Origin.SelfTest") {
+			log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
+			v.Set("Origin.SelfTest", false)
+		}
+		if v.GetBool("Origin.DirectorTest") {
+			log.Warning("Origin.DirectorTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
+			v.Set("Origin.DirectorTest", false)
+		}
+	}
+
+	if v.IsSet("Cache.LowWatermark") || v.IsSet("Cache.HighWaterMark") {
+		lowWmStr := v.GetString("Cache.LowWatermark")
+		highWmStr := v.GetString("Cache.HighWaterMark")
+		ok, highWmNum, err := checkWatermark(highWmStr)
+		if !ok && err != nil {
+			return errors.Wrap(err, "invalid Cache.HighWaterMark value")
+		}
+		ok, lowWmNum, err := checkWatermark(lowWmStr)
+		if !ok && err != nil {
+			return errors.Wrap(err, "invalid Cache.LowWatermark value")
+		}
+		if lowWmNum >= highWmNum {
+			return fmt.Errorf("invalid Cache.HighWaterMark and Cache.LowWatermark values. Cache.HighWaterMark must be greater than Cache.LowWaterMark. Got %s, %s", highWmStr, lowWmStr)
+		}
+	}
+
+	webPort := v.GetInt("Server.WebPort")
+	if webPort < 0 {
+		return errors.Errorf("the Server.WebPort setting of %d is invalid; TCP ports must be greater than 0", webPort)
+	}
+	if webPort != 443 {
+		v.SetDefault("Server.ExternalWebUrl", fmt.Sprintf("https://%s:%d", hostname, webPort))
+	} else {
+		v.SetDefault("Server.ExternalWebUrl", fmt.Sprintf("https://%s", hostname))
+	}
+	externalAddressStr := v.GetString("Server.ExternalWebUrl")
+	parsedExtAdd, err := url.Parse(externalAddressStr)
+	if err != nil {
+		return errors.Wrap(err, fmt.Sprintf("invalid Server.ExternalWebUrl: %s", externalAddressStr))
+	} else {
+		if parsedExtAdd.Port() == "443" {
+			parsedExtAdd.Host = parsedExtAdd.Hostname()
+			v.Set("Server.ExternalWebUrl", parsedExtAdd.String())
+		}
+	}
+
+	v.SetDefault("Federation.DirectorUrl", v.GetString("Server.ExternalWebUrl"))
+
+	minStatRes := v.GetInt("Director.MinStatResponse")
+	maxStatRes := v.GetInt("Director.MaxStatResponse")
+	if minStatRes <= 0 || maxStatRes <= 0 {
+		return errors.New("Invalid Director.MinStatResponse and Director.MaxStatResponse. MaxStatResponse and MinStatResponse must be positive integers")
+	}
+	if maxStatRes < minStatRes {
+		return errors.New("Invalid Director.MinStatResponse and Director.MaxStatResponse. MaxStatResponse is less than MinStatResponse")
+	}
+
+	s := server_structs.SortType(v.GetString("Director.CacheSortMethod"))
+	switch s {
+	case server_structs.DistanceType, server_structs.DistanceAndLoadType, server_structs.RandomType, server_structs.AdaptiveType:
+		break
+	case server_structs.SortType(""):
+		v.Set("Director.CacheSortMethod", server_structs.DistanceType)
+	default:
+		return fmt.Errorf("Invalid Director.CacheSortMethod. Must be one of '%s', '%s', '%s', or '%s', but you configured '%s'.",
+			server_structs.DistanceType, server_structs.DistanceAndLoadType, server_structs.RandomType, server_structs.AdaptiveType, s)
+	}
+
+	v.SetDefault("Federation.RegistryUrl", v.GetString("Server.ExternalWebUrl"))
+	v.SetDefault("Federation.BrokerURL", v.GetString("Server.ExternalWebUrl"))
+
+	tokenRefreshInterval := v.GetDuration("Monitoring.TokenRefreshInterval")
+	tokenExpiresIn := v.GetDuration("Monitoring.TokenExpiresIn")
+
+	if tokenExpiresIn == 0 || tokenRefreshInterval == 0 || tokenRefreshInterval > tokenExpiresIn {
+		v.Set("Monitoring.TokenRefreshInterval", time.Minute*5)
+		v.Set("Monitoring.TokenExpiresIn", time.Hour*1)
+		log.Warningln("Invalid Monitoring.TokenRefreshInterval or Monitoring.TokenExpiresIn. Falling back to 5m for refresh interval and 1h for valid interval")
+	}
+
+	v.Set("Origin.AudienceURL", v.GetString("Origin.Url"))
+
+	return nil
+}
+
+func InitClientCustom(v *viper.Viper) error {
+	configDir := v.GetString("ConfigDir")
+	v.SetDefault("IssuerKey", filepath.Join(configDir, "issuer.jwk"))
+
+	upper_prefix := GetPreferredPrefix()
+
+	if upper_prefix == OsdfPrefix || upper_prefix == StashPrefix {
+		v.SetDefault("Federation.TopologyNamespaceURL", "https://topology.opensciencegrid.org/osdf/namespaces")
+	}
+
+	v.SetEnvPrefix(string(upper_prefix))
+	v.AutomaticEnv()
+
+	v.SetConfigName("config")
+	v.SetConfigType("yaml")
+	err := v.ReadInConfig()
+	if err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			return err
+		}
+		// Do not fail if the config file is missing
+	}
+	env_config_file := os.Getenv(upper_prefix.String() + "_CONFIG_FILE")
+	if len(env_config_file) != 0 {
+		fp, err := os.Open(env_config_file)
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		err = v.ReadConfig(fp)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Handle all the grandfathered configuration parameters
+	prefixes := GetAllPrefixes()
+	prefixes_with_osg := append(prefixes, "OSG")
+	for _, prefix := range prefixes_with_osg {
+		if _, isSet := os.LookupEnv(prefix.String() + "_DISABLE_HTTP_PROXY"); isSet {
+			v.Set("Client.DisableHttpProxy", true)
+			break
+		}
+	}
+	for _, prefix := range prefixes_with_osg {
+		if _, isSet := os.LookupEnv(prefix.String() + "_DISABLE_PROXY_FALLBACK"); isSet {
+			v.Set("Client.DisableProxyFallback", true)
+			break
+		}
+	}
+	for _, prefix := range prefixes {
+		if val, isSet := os.LookupEnv(prefix.String() + "_DIRECTOR_URL"); isSet {
+			v.Set("Federation.DirectorURL", val)
+			break
+		}
+	}
+	for _, prefix := range prefixes {
+		if val, isSet := os.LookupEnv(prefix.String() + "_NAMESPACE_URL"); isSet {
+			v.Set("Federation.RegistryUrl", val)
+			break
+		}
+	}
+	for _, prefix := range prefixes {
+		if val, isSet := os.LookupEnv(prefix.String() + "_TOPOLOGY_NAMESPACE_URL"); isSet {
+			v.Set("Federation.TopologyNamespaceURL", val)
+			break
+		}
+	}
+
+	// Check the environment variable STASHCP_MINIMUM_DOWNLOAD_SPEED (and all the prefix variants)
+	var downloadLimit int64 = 1024 * 100
+	var prefixes_with_cp []ConfigPrefix
+	for _, prefix := range prefixes {
+		prefixes_with_cp = append(prefixes_with_cp, prefix+"CP")
+	}
+	for _, prefix := range append(prefixes, prefixes_with_cp...) {
+		downloadLimitStr := os.Getenv(prefix.String() + "_MINIMUM_DOWNLOAD_SPEED")
+		if len(downloadLimitStr) == 0 {
+			continue
+		}
+		var err error
+		downloadLimit, err = strconv.ParseInt(downloadLimitStr, 10, 64)
+		if err != nil {
+			log.Errorf("Environment variable %s_MINIMUM_DOWNLOAD_SPEED=%s is not parsable as integer: %s",
+				prefixes, downloadLimitStr, err.Error())
+		}
+		break
+	}
+	if v.IsSet("MinimumDownloadSpeed") {
+		v.SetDefault("Client.MinimumDownloadSpeed", v.GetInt("MinimumDownloadSpeed"))
+	} else {
+		v.Set("Client.MinimumDownloadSpeed", downloadLimit)
+	}
+
+	// Set our default worker count
+	v.SetDefault("Client.WorkerCount", 5)
+
+	// The transport will automatically trust this CA cert file.
+	// Even though it's a "server" setting, it's useful to have this in the client when testing
+	// against a local self-signed server.
+	v.SetDefault("Server.TLSCACertificateFile", filepath.Join(configDir, "certificates", "tlsca.pem"))
+
+	// Handle more legacy config options
+	if v.IsSet("DisableProxyFallback") {
+		v.SetDefault("Client.DisableProxyFallback", v.GetBool("DisableProxyFallback"))
+	}
+	if v.IsSet("DisableHttpProxy") {
+		v.SetDefault("Client.DisableHttpProxy", v.GetBool("DisableHttpProxy"))
+	}
+
+	// Unmarshal Viper config into a Go struct
+	unmarshalledConfig, err := param.UnmarshalConfigCustom(v)
+	if err != nil || unmarshalledConfig == nil {
+		return err
+	}
+
+	// Sets (or resets) the deferred federation lookup
+	fedDiscoveryOnce = &sync.Once{}
+
+	clientInitialized = true
+
+	return nil
+}
+
+func InitConfigCustom(v *viper.Viper) {
+	// Enable BindStruct to allow unmarshal env into a nested struct
+	v.SetConfigType("yaml")
+	// 1) Set up defaults.yaml
+	err := v.MergeConfig(strings.NewReader(defaultsYaml))
+	if err != nil {
+		cobra.CheckErr(err)
+	}
+
+	// 2) Set up osdf.yaml (if needed)
+	prefix := GetPreferredPrefix()
+	loadOSDF := prefix == OsdfPrefix
+	if os.Getenv("STASH_USE_TOPOLOGY") == "" {
+		loadOSDF = loadOSDF || (prefix == "STASH")
+	}
+	if loadOSDF {
+		err := v.MergeConfig(strings.NewReader(osdfDefaultsYaml))
+		if err != nil {
+			cobra.CheckErr(err)
+		}
+	}
+
+	// 3) Read config (from flag) or pelican.yaml
+
+	if err := InitConfigDirCustom(v); err != nil {
+		log.Errorf("Failed to initialize the config directory, Error: %v", err)
+		os.Exit(1)
+	}
+
+	if configFile := v.GetString("config"); configFile != "" {
+		v.SetConfigFile(configFile)
+	} else {
+		v.AddConfigPath(v.GetString("ConfigDir"))
+	}
+
+	v.SetEnvPrefix("pelican")
+	v.AutomaticEnv()
+	// This line allows viper to use an env var like ORIGIN_VALUE to override the viper string "Origin.Value"
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	if err := v.MergeInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			cobra.CheckErr(err)
+		}
+	}
+
+	// Handle any extra yaml configurations specified in the ConfigLocations key
+	err = handleContinuedCfg()
+	if err != nil {
+		cobra.CheckErr(err)
+	}
+}
+
+func InitConfigDirCustom(v *viper.Viper) error {
+	configDir := v.GetString("ConfigDir")
+	if configDir == "" {
+		if IsRootExecution() {
+			configDir = "/etc/pelican"
+		} else {
+			configTmp, err := getConfigBase()
+			if err != nil {
+				return err
+			}
+			configDir = configTmp
+		}
+		v.SetDefault("ConfigDir", configDir)
+	}
+	v.SetConfigName("pelican")
+	return nil
 }

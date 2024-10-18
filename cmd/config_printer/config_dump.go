@@ -5,13 +5,12 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
-
-	"github.com/pelicanplatform/pelican/param"
 )
 
 func configDump(cmd *cobra.Command, args []string) {
-	rawConfig, _ := param.UnmarshalConfig()
+	rawConfig := PopulateConfig(viper.GetViper())
 
 	switch format {
 	case "yaml":
