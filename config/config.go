@@ -1389,18 +1389,25 @@ func ResetClientInitialized() {
 	clientInitialized = false
 }
 
+func SetClientDefaults(v *viper.Viper) {
+	configDir := v.GetString("ConfigDir")
+	v.SetDefault("IssuerKey", filepath.Join(configDir, "issuer.jwk"))
+	upper_prefix := GetPreferredPrefix()
+	if upper_prefix == OsdfPrefix || upper_prefix == StashPrefix {
+		v.SetDefault("Federation.TopologyNamespaceURL", "https://topology.opensciencegrid.org/osdf/namespaces")
+	}
+	// Set our default worker count
+	v.SetDefault("Client.WorkerCount", 5)
+	v.SetDefault("Server.TLSCACertificateFile", filepath.Join(configDir, "certificates", "tlsca.pem"))
+
+}
+
 func InitClient() error {
-	configDir := viper.GetString("ConfigDir")
-	viper.SetDefault("IssuerKey", filepath.Join(configDir, "issuer.jwk"))
+	SetClientDefaults(viper.GetViper())
+	viper.AutomaticEnv()
 
 	upper_prefix := GetPreferredPrefix()
-
-	if upper_prefix == OsdfPrefix || upper_prefix == StashPrefix {
-		viper.SetDefault("Federation.TopologyNamespaceURL", "https://topology.opensciencegrid.org/osdf/namespaces")
-	}
-
 	viper.SetEnvPrefix(string(upper_prefix))
-	viper.AutomaticEnv()
 
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
@@ -1422,7 +1429,6 @@ func InitClient() error {
 			return err
 		}
 	}
-
 	// Handle all the grandfathered configuration parameters
 	prefixes := GetAllPrefixes()
 	prefixes_with_osg := append(prefixes, "OSG")
@@ -1456,7 +1462,6 @@ func InitClient() error {
 			break
 		}
 	}
-
 	// Check the environment variable STASHCP_MINIMUM_DOWNLOAD_SPEED (and all the prefix variants)
 	var downloadLimit int64 = 1024 * 100
 	var prefixes_with_cp []ConfigPrefix
@@ -1481,15 +1486,6 @@ func InitClient() error {
 	} else {
 		viper.Set("Client.MinimumDownloadSpeed", downloadLimit)
 	}
-
-	// Set our default worker count
-	viper.SetDefault("Client.WorkerCount", 5)
-
-	// The transport will automatically trust this CA cert file.
-	// Even though it's a "server" setting, it's useful to have this in the client when testing
-	// against a local self-signed server.
-	viper.SetDefault("Server.TLSCACertificateFile", filepath.Join(configDir, "certificates", "tlsca.pem"))
-
 	// Handle more legacy config options
 	if viper.IsSet("DisableProxyFallback") {
 		viper.SetDefault("Client.DisableProxyFallback", param.DisableProxyFallback.GetBool())
