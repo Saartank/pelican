@@ -749,17 +749,15 @@ func setWebConfigOverride(v *viper.Viper, configPath string) error {
 	return nil
 }
 
-func InitConfig() {
-	// Enable BindStruct to allow unmarshal env into a nested struct
-	viper.SetOptions(viper.ExperimentalBindStruct())
-	viper.SetConfigType("yaml")
+func SetBaseDefaultsInConfig(v *viper.Viper) {
+	//Load defaults.yaml
 
-	// 1) Set up defaults.yaml
 	err := viper.MergeConfig(strings.NewReader(defaultsYaml))
 	if err != nil {
 		cobra.CheckErr(err)
 	}
-	// 2) Set up osdf.yaml (if needed)
+
+	//Load osdf.yaml (if needed)
 	prefix := GetPreferredPrefix()
 	loadOSDF := prefix == OsdfPrefix
 	if os.Getenv("STASH_USE_TOPOLOGY") == "" {
@@ -772,9 +770,40 @@ func InitConfig() {
 		}
 	}
 
-	// 3) Read config (from flag) or pelican.yaml
+}
+func InitConfigDir(v *viper.Viper) error {
 
-	if err := InitConfigDir(); err != nil {
+	fmt.Println("**************** IsRootExecution():", IsRootExecution(), "*******************")
+
+	configDir := v.GetString("ConfigDir")
+	if configDir == "" {
+		if IsRootExecution() {
+			configDir = "/etc/pelican"
+		} else {
+			configTmp, err := getConfigBase()
+			if err != nil {
+				return err
+			}
+			configDir = configTmp
+		}
+		v.SetDefault("ConfigDir", configDir)
+	}
+	v.SetConfigName("pelican")
+	return nil
+}
+
+// InitConfig sets up the global Viper instance by loading defaults and
+// user-defined config files, validates config params, and initializes logging.
+func InitConfig() {
+
+	// Enable BindStruct to allow unmarshal env into a nested struct
+	viper.SetOptions(viper.ExperimentalBindStruct())
+	viper.SetConfigType("yaml")
+
+	// Set default values in the global Viper instance
+	SetBaseDefaultsInConfig(viper.GetViper())
+
+	if err := InitConfigDir(viper.GetViper()); err != nil {
 		log.Errorf("Failed to initialize the config directory, Error: %v", err)
 		os.Exit(1)
 	}
@@ -785,10 +814,12 @@ func InitConfig() {
 		viper.AddConfigPath(viper.GetString("ConfigDir"))
 	}
 
+	// Load environment variables into the config
 	bindNonPelicanEnv() // Deprecate OSDF env prefix but be compatible for now
 
 	viper.SetEnvPrefix("pelican")
 	viper.AutomaticEnv()
+
 	// This line allows viper to use an env var like ORIGIN_VALUE to override the viper string "Origin.Value"
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	if err := viper.MergeInConfig(); err != nil {
@@ -796,14 +827,11 @@ func InitConfig() {
 			cobra.CheckErr(err)
 		}
 	}
-
 	// Handle any extra yaml configurations specified in the ConfigLocations key
-	err = handleContinuedCfg()
+	err := handleContinuedCfg()
 	if err != nil {
 		cobra.CheckErr(err)
 	}
-
-	// TODO: Refactor the error handling logic below to be consistently using cobra.CheckErr
 	logLocation := param.Logging_LogLocation.GetString()
 	if logLocation != "" {
 		dir := filepath.Dir(logLocation)
@@ -850,24 +878,6 @@ func InitConfig() {
 		log.Errorln("Failed to set up translation for the validator: ", err.Error())
 		os.Exit(1)
 	}
-}
-
-func InitConfigDir() error {
-	configDir := viper.GetString("ConfigDir")
-	if configDir == "" {
-		if IsRootExecution() {
-			configDir = "/etc/pelican"
-		} else {
-			configTmp, err := getConfigBase()
-			if err != nil {
-				return err
-			}
-			configDir = configTmp
-		}
-		viper.SetDefault("ConfigDir", configDir)
-	}
-	viper.SetConfigName("pelican")
-	return nil
 }
 
 // XRootD RunLocation usage logic:
