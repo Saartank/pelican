@@ -945,6 +945,7 @@ func PrintConfig() error {
 }
 func SetServerDefaults(v *viper.Viper) error {
 	configDir := v.GetString("ConfigDir")
+	v.SetConfigType("yaml")
 	v.SetDefault("Server.WebConfigFile", filepath.Join(configDir, "web-config.yaml"))
 	v.SetDefault("Server.TLSCertificate", filepath.Join(configDir, "certificates", "tls.crt"))
 	v.SetDefault("Server.TLSKey", filepath.Join(configDir, "certificates", "tls.key"))
@@ -1049,7 +1050,7 @@ func SetServerDefaults(v *viper.Viper) error {
 // Initialize Pelican server instance. Pass a bit mask of `currentServers` if you want to enable multiple services.
 // Note not all configurations are supported: currently, if you enable both cache and origin then an error
 // is thrown
-func InitServer_DOES_NOT_WORK(ctx context.Context, currentServers server_structs.ServerType) error {
+func InitServer(ctx context.Context, currentServers server_structs.ServerType) error {
 	setEnabledServer(currentServers)
 	SetServerDefaults(viper.GetViper())
 
@@ -1061,7 +1062,6 @@ func InitServer_DOES_NOT_WORK(ctx context.Context, currentServers server_structs
 	if err := setWebConfigOverride(viper.GetViper(), param.Server_WebConfigFile.GetString()); err != nil {
 		cobra.CheckErr(errors.Wrapf(err, "failed to override configuration based on changes from web UI"))
 	}
-	viper.SetConfigType("yaml")
 	if param.Cache_DataLocation.IsSet() {
 		log.Warningf("Deprecated configuration key %s is set. Please migrate to use %s instead", param.Cache_DataLocation.GetName(), param.Cache_LocalRoot.GetName())
 		log.Warningf("Will attempt to use the value of %s as default for %s", param.Cache_DataLocation.GetName(), param.Cache_LocalRoot.GetName())
@@ -1112,10 +1112,7 @@ func InitServer_DOES_NOT_WORK(ctx context.Context, currentServers server_structs
 		return errors.Wrapf(err, "Failure when creating a directory for the shoveler on-disk queue")
 	}
 
-	hostname, err := os.Hostname()
-	if err != nil {
-		return err
-	}
+	hostname := viper.GetString("Server.Hostname")
 
 	cachePort := viper.GetInt("Cache.Port")
 	originPort := viper.GetInt("Origin.Port")
@@ -1386,7 +1383,7 @@ func InitServer_DOES_NOT_WORK(ctx context.Context, currentServers server_structs
 // Initialize Pelican server instance. Pass a bit mask of `currentServers` if you want to enable multiple services.
 // Note not all configurations are supported: currently, if you enable both cache and origin then an error
 // is thrown
-func InitServer(ctx context.Context, currentServers server_structs.ServerType) error {
+func InitServerBkp(ctx context.Context, currentServers server_structs.ServerType) error {
 	setEnabledServer(currentServers)
 
 	configDir := viper.GetString("ConfigDir")
