@@ -1008,7 +1008,12 @@ func SetServerDefaults(v *viper.Viper) error {
 	fcRunLocation := v.GetString("LocalCache.RunLocation")
 	v.SetDefault("LocalCache.Socket", filepath.Join(fcRunLocation, "cache.sock"))
 	v.SetDefault("LocalCache.DataLocation", filepath.Join(fcRunLocation, "cache"))
-	v.SetDefault("Server.TLSCACertificateFile", filepath.Join(configDir, "certificates", "tlsca.pem"))
+
+	// Any platform-specific paths should go here
+	err := InitServerOSDefaults(v)
+	if err != nil {
+		return errors.Wrapf(err, "Failure when setting up OS-specific configuration")
+	}
 
 	hostname, err := os.Hostname()
 	if err != nil {
