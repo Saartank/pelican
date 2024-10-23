@@ -877,48 +877,6 @@ func InitConfig() {
 	}
 }
 
-// XRootD RunLocation usage logic:
-//   - Origin.RunLocation and Cache.RunLocation take precedence for their respective types
-//   - If neither keys are set and Xrootd.RunLocation is, then use that and emit a warning
-//   - If neither key is set, Xrootd.Runlocation is, and both modules are enabled, then we don't
-//     know the next steps -- throw an error
-// func setXrootdRunLocations(currentServers server_structs.ServerType, dir string) error {
-// 	cacheLocation := viper.GetString("Cache.RunLocation")
-// 	originLocation := viper.GetString("Origin.RunLocation")
-// 	xrootdLocation := viper.GetString("Xrootd.RunLocation")
-// 	xrootdLocationIsSet := viper.IsSet("Xrootd.RunLocation")
-// 	cacheLocFallbackToXrootd := false
-// 	originLocFallbackToXrootd := false
-// 	if currentServers.IsEnabled(server_structs.CacheType) {
-// 		if !viper.IsSet("Cache.RunLocation") {
-// 			if xrootdLocationIsSet {
-// 				cacheLocFallbackToXrootd = true
-// 				cacheLocation = xrootdLocation
-// 			} else {
-// 				cacheLocation = filepath.Join(dir, "cache")
-// 			}
-// 		}
-// 	}
-// 	if currentServers.IsEnabled(server_structs.OriginType) && !viper.IsSet("Origin.RunLocation") {
-// 		if xrootdLocationIsSet {
-// 			originLocFallbackToXrootd = true
-// 			originLocation = xrootdLocation
-// 		} else {
-// 			originLocation = filepath.Join(dir, "origin")
-// 		}
-// 	}
-// 	if cacheLocFallbackToXrootd && originLocFallbackToXrootd {
-// 		return errors.New("Xrootd.RunLocation is set, but both modules are enabled.  Please set Cache.RunLocation and Origin.RunLocation or disable Xrootd.RunLocation so the default location can be used.")
-// 	}
-// 	if currentServers.IsEnabled(server_structs.OriginType) {
-// 		viper.SetDefault("Origin.RunLocation", originLocation)
-// 	}
-// 	if currentServers.IsEnabled(server_structs.CacheType) {
-// 		viper.SetDefault("Cache.RunLocation", cacheLocation)
-// 	}
-// 	return nil
-// }
-
 func PrintPelicanVersion(out *os.File) {
 	fmt.Fprintln(out, "Version:", GetVersion())
 	fmt.Fprintln(out, "Build Date:", GetBuiltDate())
