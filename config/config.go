@@ -886,7 +886,7 @@ func PrintPelicanVersion(out *os.File) {
 
 // Print Pelican configuration to stderr
 func PrintConfig() error {
-	rawConfig, err := param.UnmarshalConfig()
+	rawConfig, err := param.UnmarshalConfig(viper.GetViper())
 	if err != nil {
 		return err
 	}
@@ -1298,7 +1298,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	}
 
 	// Unmarshal Viper config into a Go struct
-	unmarshalledConfig, err := param.UnmarshalConfig()
+	unmarshalledConfig, err := param.UnmarshalConfig(viper.GetViper())
 	if err != nil || unmarshalledConfig == nil {
 		return err
 	}
@@ -1463,7 +1463,7 @@ func InitClient() error {
 	setupTransport()
 
 	// Unmarshal Viper config into a Go struct
-	unmarshalledConfig, err := param.UnmarshalConfig()
+	unmarshalledConfig, err := param.UnmarshalConfig(viper.GetViper())
 	if err != nil || unmarshalledConfig == nil {
 		return err
 	}

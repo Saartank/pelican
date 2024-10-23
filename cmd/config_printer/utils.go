@@ -16,7 +16,7 @@ func initClientAndServerConfig(v *viper.Viper) *param.Config {
 	config.SetServerDefaults(v)
 	config.SetClientDefaults(v)
 
-	exapandedConfig, err := param.NonGlobalUnmarshalConfig(v)
+	exapandedConfig, err := param.UnmarshalConfig(v)
 	if err != nil {
 		fmt.Println("Error:", err)
 	}
