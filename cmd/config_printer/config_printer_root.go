@@ -87,8 +87,8 @@ func init() {
 
 	configDumpCmd.Flags().StringVarP(&format, "format", "o", "yaml", "Output format (yaml or json)")
 
-	configGetCmd.Flags().StringArrayVarP(&components, "component", "c", []string{},
-		"Specify components to filter the output of 'config get'. If multiple components are provided, parameters related to any of the components will be retrieved. If no components are specified, no component-based filter is applied to the search space.")
+	configGetCmd.Flags().StringArrayVarP(&components, "module", "m", []string{},
+		"Specify modules to filter the output of 'config get'. If multiple modules are provided, parameters related to any of the modules will be retrieved. If no modules are specified, no component-based filter is applied to the search space.")
 	configGetCmd.Flags().BoolVar(&includeHidden, "include-hidden", false, "Include hidden configuration parameters")
 	configGetCmd.Flags().BoolVar(&includeDeprecated, "include-deprecated", false, "Include deprecated configuration parameters")
 
