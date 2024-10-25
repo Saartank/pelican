@@ -1245,7 +1245,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		return errors.New("the configuration Origin.Port is not set but the Origin module is enabled.  Please set Origin.Port")
 	}
 
-	if currentServers.IsEnabled(server_structs.CacheType) && !viper.IsSet("Cache.Port") && currentServers.IsEnabled(server_structs.OriginType) && !viper.IsSet("Origin.Port") {
+	if currentServers.IsEnabled(server_structs.CacheType) && currentServers.IsEnabled(server_structs.OriginType) && viper.GetInt("Cache.Port") == viper.GetInt("Origin.Port") && viper.IsSet("Xrootd.Port") {
 		return errors.New("neither Cache.Port nor Origin.Port is set but both modules are enabled.  Please set both variables")
 	}
 
