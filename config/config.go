@@ -1086,7 +1086,7 @@ func SetServerDefaults(v *viper.Viper) error {
 		// We get rid of any 443 port if present to be consistent
 		if parsedExtAdd.Port() == "443" {
 			parsedExtAdd.Host = parsedExtAdd.Hostname()
-			v.SetDefault("Server.ExternalWebUrl", parsedExtAdd.String())
+			v.Set("Server.ExternalWebUrl", parsedExtAdd.String())
 		}
 	}
 
@@ -1266,6 +1266,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	}
 
 	if currentServers.IsEnabled(server_structs.DirectorType) {
+		viper.SetDefault("Federation.DirectorUrl", param.Server_ExternalWebUrl.GetString())
 		minStatRes := param.Director_MinStatResponse.GetInt()
 		maxStatRes := param.Director_MaxStatResponse.GetInt()
 		if minStatRes <= 0 || maxStatRes <= 0 {
@@ -1288,13 +1289,15 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		viper.SetDefault("Federation.DirectorUrl", "")
 	}
 
-	//Setting defaults back to an empty string if the server of that type is not enabled, as this URL is matched with "" in many downstream tasks to check if the server of that type is enabled.
-
-	if !currentServers.IsEnabled(server_structs.RegistryType) {
+	if currentServers.IsEnabled(server_structs.RegistryType) {
+		viper.SetDefault("Federation.RegistryUrl", param.Server_ExternalWebUrl.GetString())
+	} else {
 		viper.SetDefault("Federation.RegistryUrl", "")
 	}
 
-	if !currentServers.IsEnabled(server_structs.BrokerType) {
+	if currentServers.IsEnabled(server_structs.BrokerType) {
+		viper.SetDefault("Federation.BrokerURL", param.Server_ExternalWebUrl.GetString())
+	} else {
 		viper.SetDefault("Federation.BrokerURL", "")
 	}
 
