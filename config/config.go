@@ -1043,17 +1043,17 @@ func SetServerDefaults(v *viper.Viper) error {
 			originPort = xrootdPort
 		}
 	}
-	v.Set("Origin.CalculatedPort", strconv.Itoa(originPort))
+	v.SetDefault("Origin.CalculatedPort", strconv.Itoa(originPort))
 	if originPort == 0 {
-		v.Set("Origin.CalculatedPort", "any")
+		v.SetDefault("Origin.CalculatedPort", "any")
 	}
-	v.Set("Cache.CalculatedPort", strconv.Itoa(cachePort))
+	v.SetDefault("Cache.CalculatedPort", strconv.Itoa(cachePort))
 	if cachePort == 0 {
-		v.Set("Cache.CalculatedPort", "any")
+		v.SetDefault("Cache.CalculatedPort", "any")
 	}
 
-	v.Set("Origin.Port", originPort)
-	v.Set("Cache.Port", cachePort)
+	v.SetDefault("Origin.Port", originPort)
+	v.SetDefault("Cache.Port", cachePort)
 
 	if originPort != 443 {
 		v.SetDefault("Origin.Url", fmt.Sprintf("https://%v:%v", v.GetString("Server.Hostname"), originPort))
@@ -1086,15 +1086,29 @@ func SetServerDefaults(v *viper.Viper) error {
 		// We get rid of any 443 port if present to be consistent
 		if parsedExtAdd.Port() == "443" {
 			parsedExtAdd.Host = parsedExtAdd.Hostname()
-			v.Set("Server.ExternalWebUrl", parsedExtAdd.String())
+			v.SetDefault("Server.ExternalWebUrl", parsedExtAdd.String())
 		}
 	}
 
-	v.Set("Origin.AudienceURL", v.GetString("Origin.Url"))
+	v.SetDefault("Origin.AudienceURL", v.GetString("Origin.Url"))
 
-	v.SetDefault("Federation.RegistryUrl", v.GetString("Server.ExternalWebUrl"))
-	v.SetDefault("Federation.BrokerURL", v.GetString("Server.ExternalWebUrl"))
-	v.SetDefault("Federation.DirectorUrl", v.GetString("Server.ExternalWebUrl"))
+	// Set defaults for Director, Registry, and Broker URLs only if the Discovery URL is not set.
+	// This is necessary because, in Viper, there is currently no way to check if a value is coming
+	// from the default or was explicitly set by the user. Therefore, if the DiscoveryURL is present,
+	// when populating the Director, Registry, and Broker URLs, the discoverFederationImpl function
+	// checks if these values are empty. An empty value indicates that the URLs were not explicitly
+	// set, so values obtained through the discovery process should be used.
+	//
+	// If we set default values now, there would be no way for discoverFederationImpl to determine
+	// whether the values are defaults (and should be overridden) or were explicitly set by the user
+	// (and should not be overridden).
+	// A feature request to address this issue has already been submitted to the Viper repository by our team:
+	// https://github.com/spf13/viper/issues/1814
+	if !viper.IsSet("Federation.DiscoveryUrl") {
+		v.SetDefault("Federation.RegistryUrl", v.GetString("Server.ExternalWebUrl"))
+		v.SetDefault("Federation.BrokerURL", v.GetString("Server.ExternalWebUrl"))
+		v.SetDefault("Federation.DirectorUrl", v.GetString("Server.ExternalWebUrl"))
+	}
 
 	return err
 }
