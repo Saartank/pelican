@@ -1388,6 +1388,8 @@ func SetClientDefaults(v *viper.Viper) error {
 	v.SetDefault("Client.WorkerCount", 5)
 	v.SetDefault("Server.TLSCACertificateFile", filepath.Join(configDir, "certificates", "tlsca.pem"))
 
+	var downloadLimit int64 = 1024 * 100
+	v.SetDefault("Client.MinimumDownloadSpeed", downloadLimit)
 	if v == viper.GetViper() {
 		viper.AutomaticEnv()
 		upper_prefix := GetPreferredPrefix()
