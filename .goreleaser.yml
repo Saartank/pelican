@@ -24,7 +24,7 @@ before:
   hooks:
     - go mod tidy
     - go generate ./...
-    - make web-build
+    # - make web-build
 builds:
   - env:
       - CGO_ENABLED=0
@@ -93,15 +93,15 @@ archives:
       {{- else }}{{ .Arch }}{{ end }}
     wrap_in_directory: '{{ .ProjectName }}-server-{{ trimsuffix .Version "-next" }}'
 checksum:
-  name_template: 'checksums.txt'
+  name_template: "checksums.txt"
 snapshot:
   name_template: "{{ incpatch .Version }}-next"
 changelog:
   sort: asc
   filters:
     exclude:
-      - '^docs:'
-      - '^test:'
+      - "^docs:"
+      - "^test:"
       - Merge pull request
       - Merge branch
 
