@@ -60,6 +60,7 @@ Director:
   CachePresenceTTL: 1m
   CachePresenceCapacity: 10000
 Cache:
+  EnablePrefetch: true
   DefaultCacheTimeout: "9.5s"
   Port: 8442
   SelfTest: true

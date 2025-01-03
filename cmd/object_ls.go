@@ -46,6 +46,7 @@ func init() {
 	flagSet := lsCmd.Flags()
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
 	flagSet.BoolP("long", "l", false, "Include extended information")
+	flagSet.StringP("collections-url", "", "", "URL to use for collection listing, overriding the director's response")
 	flagSet.BoolP("collectionOnly", "C", false, "List collections only")
 	flagSet.BoolP("objectonly", "O", false, "List objects only")
 	flagSet.BoolP("json", "j", false, "Print results in JSON format")
@@ -85,13 +86,14 @@ func listMain(cmd *cobra.Command, args []string) error {
 	collectionOnly, _ := cmd.Flags().GetBool("collectionOnly")
 	objectOnly, _ := cmd.Flags().GetBool("objectonly")
 	asJSON, _ := cmd.Flags().GetBool("json")
+	collectionsUrl, _ := cmd.Flags().GetString("collections-url")
 
 	if collectionOnly && objectOnly {
 		// If a user specifies collectionOnly and objectOnly, this means basic functionality (list both objects and directories) so just remove the flags
 		return errors.New("cannot specify both collectionOnly (-C) and object only (-O) flags, as they are mutually exclusive")
 	}
 
-	fileInfos, err := client.DoList(ctx, object, client.WithTokenLocation(tokenLocation))
+	fileInfos, err := client.DoList(ctx, object, client.WithTokenLocation(tokenLocation), client.WithCollectionsUrl(collectionsUrl))
 
 	// Exit with failure
 	if err != nil {
