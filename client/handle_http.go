@@ -1506,7 +1506,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 	if packOption != "" {
 		log.Debugln("Will use unpack option value", packOption)
 	}
-	remoteUrl := &url.URL{Path: job.job.remoteURL.Path, Scheme: job.job.remoteURL.Scheme}
+	remoteUrl := &url.URL{Path: job.job.remoteURL.Path, Scheme: job.job.remoteURL.Scheme, Host: job.job.remoteURL.Host}
 
 	var transfers []transferAttemptDetails
 	if job.job.xferType == transferTypeUpload { // Uploads use the redirected endpoint
