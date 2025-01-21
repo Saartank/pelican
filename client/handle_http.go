@@ -72,6 +72,11 @@ type (
 
 	classAd string
 
+	cacheItem struct {
+		url pelicanUrl
+		err error
+	}
+
 	transferType int
 
 	// Error type for when the transfer started to return data then completely stopped
@@ -300,24 +305,14 @@ const (
 	projectName classAd = "ProjectName"
 	jobId       classAd = "GlobalJobId"
 
-	SyncNone                          = iota // When synchronizing, always re-transfer, regardless of existence at destination.
-	SyncExist                                // Skip synchronization transfer if the destination exists
-	SyncSize                                 // Skip synchronization transfer if the destination exists and matches the current source size
+	SyncNone  = iota // When synchronizing, always re-transfer, regardless of existence at destination.
+	SyncExist        // Skip synchronization transfer if the destination exists
+	SyncSize         // Skip synchronization transfer if the destination exists and matches the current source size
+
 	transferTypeDownload transferType = iota // Transfer is downloading from the federation
 	transferTypeUpload                       // Transfer is uploading to the federation
 	transferTypePrestage                     // Transfer is staging at a federation cache
 )
-
-// The progress container object creates several
-// background goroutines.  Instead of creating the object
-// globally, create it on first use.  This avoids having
-// the progress container routines launch in the server.
-func getProgressContainer() *mpb.Progress {
-	progressCtrOnce.Do(func() {
-		progressCtr = mpb.New()
-	})
-	return progressCtr
-}
 
 // Function for merging two contexts together into one (returning a cancel)
 func mergeCancel(ctx1, ctx2 context.Context) (context.Context, context.CancelFunc) {
@@ -329,6 +324,17 @@ func mergeCancel(ctx1, ctx2 context.Context) (context.Context, context.CancelFun
 		stop()
 		cancel()
 	}
+}
+
+// The progress container object creates several
+// background goroutines.  Instead of creating the object
+// globally, create it on first use.  This avoids having
+// the progress container routines launch in the server.
+func getProgressContainer() *mpb.Progress {
+	progressCtrOnce.Do(func() {
+		progressCtr = mpb.New()
+	})
+	return progressCtr
 }
 
 func (e *HeaderTimeoutError) Error() string {
@@ -1134,13 +1140,13 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 	// See if we have a projectName defined
 	project := searchJobAd(projectName)
 
-	pelicanURL, err := ParseRemoteAsPUrl(ctx, remoteUrl.String())
+	pelicanURL, err := tc.engine.newPelicanURL(remoteUrl)
 	if err != nil {
 		err = errors.Wrap(err, "error generating metadata for specified url")
 		return
 	}
 
-	copyUrl := *pelicanURL // Make a copy of the input URL to avoid concurrent issues.
+	copyUrl := *remoteUrl // Make a copy of the input URL to avoid concurrent issues.
 	tj = &TransferJob{
 		prefObjServers: tc.prefObjServers,
 		remoteURL:      &copyUrl,
@@ -1178,8 +1184,8 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 		}
 	}
 
-	tj.directorUrl = pelicanURL.FedInfo.DirectorEndpoint
-	dirResp, err := GetDirectorInfoForPath(tj.ctx, pelicanURL, http.MethodGet, "")
+	tj.directorUrl = pelicanURL.directorUrl
+	dirResp, err := GetDirectorInfoForPath(tj.ctx, remoteUrl.Path, pelicanURL.directorUrl, false, remoteUrl.RawQuery, "")
 	if err != nil {
 		log.Errorln(err)
 		err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
@@ -1197,7 +1203,7 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 
 		// The director response may change if it's given a token; let's repeat the query.
 		if contents != "" {
-			dirResp, err = GetDirectorInfoForPath(tj.ctx, pelicanURL, http.MethodGet, contents)
+			dirResp, err = GetDirectorInfoForPath(tj.ctx, remoteUrl.Path, pelicanURL.directorUrl, false, remoteUrl.RawQuery, contents)
 			if err != nil {
 				log.Errorln(err)
 				err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
@@ -1241,14 +1247,14 @@ func (tc *TransferClient) Submit(tj *TransferJob) error {
 func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, options ...TransferOption) (age int, size int64, err error) {
 	age = -1
 
-	pelicanURL, err := ParseRemoteAsPUrl(ctx, remoteUrl.String())
+	pelicanURL, err := tc.engine.newPelicanURL(remoteUrl)
 	if err != nil {
 		err = errors.Wrap(err, "error generating metadata for specified URL")
 		return
 	}
 
 	var prefObjServers []*url.URL
-	token := newTokenGenerator(pelicanURL, nil, false, true)
+	token := newTokenGenerator(remoteUrl, nil, false, true)
 	if tc.token != "" {
 		token.SetToken(tc.token)
 	}
@@ -1274,7 +1280,7 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 	ctx, cancel := mergeCancel(tc.ctx, ctx)
 	defer cancel()
 
-	dirResp, err := GetDirectorInfoForPath(ctx, pelicanURL, http.MethodGet, "")
+	dirResp, err := GetDirectorInfoForPath(ctx, remoteUrl.Path, pelicanURL.directorUrl, false, remoteUrl.RawQuery, "")
 	if err != nil {
 		log.Errorln(err)
 		err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
@@ -1292,7 +1298,7 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 
 		// The director response may change if it's given a token; let's repeat the query.
 		if contents != "" {
-			dirResp, err = GetDirectorInfoForPath(ctx, pelicanURL, http.MethodGet, contents)
+			dirResp, err = GetDirectorInfoForPath(ctx, remoteUrl.Path, pelicanURL.directorUrl, false, remoteUrl.RawQuery, contents)
 			if err != nil {
 				log.Errorln(err)
 				err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
@@ -1506,10 +1512,10 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 	if packOption != "" {
 		log.Debugln("Will use unpack option value", packOption)
 	}
-	remoteUrl := &url.URL{Path: job.job.remoteURL.Path, Scheme: job.job.remoteURL.Scheme, Host: job.job.remoteURL.Host}
+	remoteUrl := &url.URL{Path: job.job.remoteURL.Path, Scheme: job.job.remoteURL.Scheme}
 
 	var transfers []transferAttemptDetails
-	if job.job.xferType == transferTypeUpload { // Uploads use the redirected endpoint
+	if job.job.xferType == transferTypeUpload { // Uploads use the redirected endpoint directly
 		if len(job.job.dirResp.ObjectServers) == 0 {
 			err = errors.New("No origins found for upload")
 			return
@@ -1555,12 +1561,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 		// For prestage, from day one we handle internally whether it's recursive
 		// (as opposed to making the user specify explicitly)
 		var statInfo FileInfo
-		var pelicanUrl *pelican_url.PelicanURL
-		pelicanUrl, err = pelican_url.Parse(remoteUrl.String(), nil, nil)
-		if err != nil {
-			return
-		}
-		if statInfo, err = statHttp(pelicanUrl, job.job.dirResp, job.job.token); err != nil {
+		if statInfo, err = statHttp(remoteUrl, job.job.dirResp, job.job.token); err != nil {
 			err = errors.Wrap(err, "failed to stat object to prestage")
 			return
 		}
@@ -1694,10 +1695,8 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 			}
 
 			if age, size, err := objectCached(ctx, tUrl, token, transport); err != nil {
-
 				headChan <- checkResults{idx, 0, -1, err}
 				return
-
 			} else {
 				headChan <- checkResults{idx, uint64(size), age, err}
 			}
@@ -1772,6 +1771,7 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 // create the destination directory).
 func downloadObject(transfer *transferFile) (transferResults TransferResults, err error) {
 	log.Debugln("Downloading object from", transfer.remoteURL, "to", transfer.localPath)
+
 	var downloaded int64
 	localPath := transfer.localPath
 	if transfer.xferType == transferTypeDownload {
@@ -1983,10 +1983,10 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		unpacker = newAutoUnpacker(dest, behavior)
 		if req, err = grab.NewRequestToWriter(unpacker, transferUrl.String()); err != nil {
 			return 0, 0, -1, "", errors.Wrap(err, "Failed to create new download request")
-		} else if dest == "/dev/null" {
-			if req, err = grab.NewRequestToWriter(io.Discard, transferUrl.String()); err != nil {
-				return 0, 0, -1, "", errors.Wrap(err, "Failed to create new prestage request")
-			}
+		}
+	} else if dest == "/dev/null" {
+		if req, err = grab.NewRequestToWriter(io.Discard, transferUrl.String()); err != nil {
+			return 0, 0, -1, "", errors.Wrap(err, "Failed to create new prestage request")
 		}
 	} else if req, err = grab.NewRequest(dest, transferUrl.String()); err != nil {
 		return 0, 0, -1, "", errors.Wrap(err, "Failed to create new download request")
@@ -2526,6 +2526,16 @@ func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan
 
 }
 
+// This helper function creates a web dav client to walkDavDir's. Used for recursive downloads and lists
+func createWebDavClient(collectionsUrl *url.URL, token *tokenGenerator, project string) (client *gowebdav.Client) {
+	auth := &bearerAuth{token: token}
+	client = gowebdav.NewAuthClient(collectionsUrl.String(), auth)
+	client.SetHeader("User-Agent", getUserAgent(project))
+	transport := config.GetTransport()
+	client.SetTransport(transport)
+	return
+}
+
 // Determine whether to skip a prestage based on whether an object is at a cache
 func skipPrestage(object string, job *TransferJob) bool {
 	var cache url.URL
@@ -2544,16 +2554,6 @@ func skipPrestage(object string, job *TransferJob) bool {
 		log.Warningln("Failed to check cache status of object", cache.String(), "so assuming it needs prestaging:", err)
 		return false
 	}
-}
-
-// This helper function creates a web dav client to walkDavDir's. Used for recursive downloads and lists
-func createWebDavClient(collectionsUrl *url.URL, token *tokenGenerator, project string) (client *gowebdav.Client) {
-	auth := &bearerAuth{token: token}
-	client = gowebdav.NewAuthClient(collectionsUrl.String(), auth)
-	client.SetHeader("User-Agent", getUserAgent(project))
-	transport := config.GetTransport()
-	client.SetTransport(transport)
-	return
 }
 
 // Depending on the synchronization policy, decide if a object download should be skipped
@@ -2651,7 +2651,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 							remoteURL:  &url.URL{Path: remotePath},
 							packOption: transfers[0].PackOption,
 							localPath:  job.job.localPath,
-							xferType:   job.job.xferType,
+							upload:     job.job.upload,
 							token:      job.job.token,
 							attempts:   transfers,
 						},
@@ -2738,7 +2738,7 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 						remoteURL:  &url.URL{Path: remotePath},
 						packOption: transfers[0].PackOption,
 						localPath:  job.job.localPath,
-						xferType:   job.job.xferType,
+						upload:     job.job.upload,
 						token:      job.job.token,
 						attempts:   transfers,
 					},
@@ -2804,6 +2804,10 @@ func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.Director
 	}
 
 	collectionsUrl := dirResp.XPelNsHdr.CollectionsUrl
+	if collectionsUrl == nil {
+		err = errors.New("namespace does not provide a collections URL for listing")
+		return
+	}
 	log.Debugln("Collections URL: ", collectionsUrl.String())
 
 	project := searchJobAd(projectName)

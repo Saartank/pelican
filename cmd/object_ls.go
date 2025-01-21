@@ -45,10 +45,10 @@ var (
 func init() {
 	flagSet := lsCmd.Flags()
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
-	flagSet.BoolP("long", "l", false, "Include extended information")
 	flagSet.StringP("collections-url", "", "", "URL to use for collection listing, overriding the director's response")
-	flagSet.BoolP("collectionOnly", "C", false, "List collections only")
-	flagSet.BoolP("objectonly", "O", false, "List objects only")
+	flagSet.BoolP("long", "l", false, "Include extended information")
+	flagSet.BoolP("collection-only", "C", false, "List collections only")
+	flagSet.BoolP("object-only", "O", false, "List objects only")
 	flagSet.BoolP("json", "j", false, "Print results in JSON format")
 
 	objectCmd.AddCommand(lsCmd)
@@ -83,8 +83,8 @@ func listMain(cmd *cobra.Command, args []string) error {
 	log.Debugln("Location:", object)
 
 	long, _ := cmd.Flags().GetBool("long")
-	collectionOnly, _ := cmd.Flags().GetBool("collectionOnly")
-	objectOnly, _ := cmd.Flags().GetBool("objectonly")
+	collectionOnly, _ := cmd.Flags().GetBool("collection-only")
+	objectOnly, _ := cmd.Flags().GetBool("object-only")
 	asJSON, _ := cmd.Flags().GetBool("json")
 	collectionsUrl, _ := cmd.Flags().GetString("collections-url")
 
