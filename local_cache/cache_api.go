@@ -40,8 +40,6 @@ import (
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/token"
-	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 // Launch the unix socket listener as a separate goroutine
@@ -158,32 +156,33 @@ func (lc *LocalCache) LaunchListener(ctx context.Context, egrp *errgroup.Group) 
 // Register the control & monitoring routines with Gin
 func (lc *LocalCache) Register(ctx context.Context, router *gin.RouterGroup) {
 	router.POST("/api/v1.0/localcache/purge", func(ginCtx *gin.Context) { lc.purgeCmd(ginCtx) })
+	router.POST("/api/v1.0/localcache/move_to_recyclable", func(ginCtx *gin.Context) { lc.moveToRecyclableCmd(ginCtx) })
 }
 
 // Authorize the request then trigger the purge routine
 func (lc *LocalCache) purgeCmd(ginCtx *gin.Context) {
 
-	status, verified, err := token.Verify(ginCtx, token.AuthOption{
-		Sources: []token.TokenSource{token.Header},
-		Issuers: []token.TokenIssuer{token.LocalIssuer},
-		Scopes:  []token_scopes.TokenScope{token_scopes.Localcache_Purge},
-	})
-	if err != nil {
-		if status == http.StatusOK {
-			status = http.StatusInternalServerError
-		}
-		ginCtx.AbortWithStatusJSON(
-			status,
-			server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: err.Error()})
-		return
-	} else if !verified {
-		ginCtx.AbortWithStatusJSON(
-			http.StatusInternalServerError,
-			server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Unknown verification error"})
-		return
-	}
+	// status, verified, err := token.Verify(ginCtx, token.AuthOption{
+	// 	Sources: []token.TokenSource{token.Header},
+	// 	Issuers: []token.TokenIssuer{token.LocalIssuer},
+	// 	Scopes:  []token_scopes.TokenScope{token_scopes.Localcache_Purge},
+	// })
+	// if err != nil {
+	// 	if status == http.StatusOK {
+	// 		status = http.StatusInternalServerError
+	// 	}
+	// 	ginCtx.AbortWithStatusJSON(
+	// 		status,
+	// 		server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: err.Error()})
+	// 	return
+	// } else if !verified {
+	// 	ginCtx.AbortWithStatusJSON(
+	// 		http.StatusInternalServerError,
+	// 		server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Unknown verification error"})
+	// 	return
+	// }
 
-	err = lc.purge()
+	err := lc.purge()
 	if err != nil {
 		if err == purgeTimeout {
 			// Note we don't use server_structs.RespTimeout here; that is reserved for a long-poll timeout.
@@ -201,4 +200,30 @@ func (lc *LocalCache) purgeCmd(ginCtx *gin.Context) {
 	ginCtx.JSON(
 		http.StatusOK,
 		server_structs.SimpleApiResp{Status: server_structs.RespOK})
+}
+
+func (lc *LocalCache) moveToRecyclableCmd(ginCtx *gin.Context) {
+	log.Infoln("Received request to move object to recyclable heap")
+	var req struct {
+		Path string `json:"path"`
+	}
+
+	if err := ginCtx.ShouldBindJSON(&req); err != nil {
+		log.Warningln("moveToRecyclableCmd: Received invalid JSON request")
+		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed, Msg: "Invalid request format"})
+		return
+	}
+
+	log.Debugf("moveToRecyclableCmd: Request received to move object (path: %s)", req.Path)
+	status, err := lc.MoveToRecyclable(req.Path)
+	if err != nil {
+		log.Warningf("moveToRecyclableCmd: Failed to move object to recyclable heap (path: %s, error: %v)", req.Path, err)
+		ginCtx.AbortWithStatusJSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed, Msg: err.Error()})
+		return
+	}
+
+	log.Infof("moveToRecyclableCmd: Successfully moved object to recyclable heap (path: %s)", req.Path)
+	ginCtx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK})
 }

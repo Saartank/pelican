@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"path"
@@ -72,6 +73,10 @@ type (
 		hitChan   chan lruEntry // Notifies the central handler the cache has been used
 		lru       lru           // Manages a LRU of cache entries
 		lruLookup map[string]*lruEntry
+
+		recyclableHeap   lru
+		recyclableLookup map[string]*lruEntry
+
 		cacheSize uint64 // Total cache size
 	}
 
@@ -282,19 +287,20 @@ func NewLocalCache(ctx context.Context, egrp *errgroup.Group, options ...LocalCa
 	}
 
 	lc = &LocalCache{
-		ctx:         ctx,
-		egrp:        egrp,
-		te:          te,
-		downloads:   make(map[string]*activeDownload),
-		hitChan:     make(chan lruEntry, 64),
-		highWater:   (cacheSize / 100) * uint64(highWaterPercentage),
-		lowWater:    (cacheSize / 100) * uint64(lowWaterPercentage),
-		cacheSize:   0,
-		basePath:    cacheDir,
-		ac:          newAuthConfig(ctx, egrp),
-		sizeReq:     make(chan availSizeReq),
-		directorURL: directorUrl,
-		lruLookup:   make(map[string]*lruEntry),
+		ctx:              ctx,
+		egrp:             egrp,
+		te:               te,
+		downloads:        make(map[string]*activeDownload),
+		hitChan:          make(chan lruEntry, 64),
+		highWater:        (cacheSize / 100) * uint64(highWaterPercentage),
+		lowWater:         (cacheSize / 100) * uint64(lowWaterPercentage),
+		cacheSize:        0,
+		basePath:         cacheDir,
+		ac:               newAuthConfig(ctx, egrp),
+		sizeReq:          make(chan availSizeReq),
+		directorURL:      directorUrl,
+		lruLookup:        make(map[string]*lruEntry),
+		recyclableLookup: make(map[string]*lruEntry),
 	}
 
 	lc.tc, err = lc.te.NewClient(client.WithAcquireToken(false), client.WithCallback(lc.callback))
@@ -608,28 +614,130 @@ func (lc *LocalCache) lruHit(hit lruEntry) {
 	}
 }
 
+// func (lc *LocalCache) purge() (err error) {
+// 	log.Debugln("Starting purge routine")
+// 	lc.purgeMutex.Lock()
+// 	defer lc.purgeMutex.Unlock()
+
+// 	start := time.Now()
+
+// 	// Purge recyclableHeap first
+// 	heap.Init(&lc.recyclableHeap)
+// 	log.Debugf("Purging recyclable objects first; cache size is %d, low watermark is %d", lc.cacheSize, lc.lowWater)
+// 	for lc.cacheSize > lc.lowWater {
+// 		if len(lc.recyclableHeap) == 0 {
+// 			log.Debugln("Recyclable heap is empty, moving to main LRU heap")
+// 			break
+// 		}
+// 		entry := heap.Pop(&lc.recyclableHeap).(*lruEntry)
+// 		if entry == nil {
+// 			log.Warningln("Consistency error: purge ran but no entry provided")
+// 			continue
+// 		}
+// 		if entry.path == "" {
+// 			log.Warningln("Consistency error: purge ran on an empty path")
+// 			continue
+// 		}
+
+// 		localPath := path.Join(lc.basePath, path.Clean(entry.path))
+// 		if rmErr := os.Remove(localPath + ".DONE"); rmErr != nil {
+// 			log.Warningln("Failed to purge DONE file:", rmErr)
+// 			if err == nil {
+// 				err = rmErr
+// 			}
+// 		}
+// 		if rmErr := os.Remove(localPath); rmErr != nil {
+// 			log.Warningln("Failed to purge file:", rmErr)
+// 			if err == nil {
+// 				err = rmErr
+// 			}
+// 		} else {
+// 			log.Debugf("Successfully purged file %s", localPath)
+// 		}
+
+// 		delete(lc.recyclableLookup, entry.path)
+// 		lc.cacheSize -= uint64(entry.size)
+
+// 		if time.Since(start) > 3*time.Second {
+// 			err = purgeTimeout
+// 			log.Warningln("Purge timeout while clearing recyclable objects")
+// 			return
+// 		}
+// 	}
+
+// 	// Now purge from the main LRU heap if lowWater is still not reached
+// 	heap.Init(&lc.lru)
+// 	log.Debugf("Purging main cache; cache size is %d, low watermark is %d", lc.cacheSize, lc.lowWater)
+// 	for lc.cacheSize > lc.lowWater {
+// 		if len(lc.lru) == 0 {
+// 			err = errors.New("purge ran until cache was empty")
+// 			log.Warningln("Potential consistency error: purge ran until cache was empty")
+// 			break
+// 		}
+// 		entry := heap.Pop(&lc.lru).(*lruEntry)
+// 		if entry == nil {
+// 			log.Warningln("Consistency error: purge ran but no entry provided")
+// 			continue
+// 		}
+// 		if entry.path == "" {
+// 			log.Warningln("Consistency error: purge ran on an empty path")
+// 			continue
+// 		}
+
+// 		localPath := path.Join(lc.basePath, path.Clean(entry.path))
+// 		if rmErr := os.Remove(localPath + ".DONE"); rmErr != nil {
+// 			log.Warningln("Failed to purge DONE file:", rmErr)
+// 			if err == nil {
+// 				err = rmErr
+// 			}
+// 		}
+// 		if rmErr := os.Remove(localPath); rmErr != nil {
+// 			log.Warningln("Failed to purge file:", rmErr)
+// 			if err == nil {
+// 				err = rmErr
+// 			}
+// 		} else {
+// 			log.Debugf("Successfully purged file %s", localPath)
+// 		}
+// 		delete(lc.lruLookup, entry.path)
+// 		lc.cacheSize -= uint64(entry.size)
+
+// 		// Ensure purge does not block for too long
+// 		if time.Since(start) > 3*time.Second {
+// 			err = purgeTimeout
+// 			log.Warningln("Purge timeout while clearing main LRU heap")
+// 			break
+// 		}
+// 	}
+
+// 	return
+// }
+
 func (lc *LocalCache) purge() (err error) {
 	log.Debugln("Starting purge routine")
 	lc.purgeMutex.Lock()
 	defer lc.purgeMutex.Unlock()
-	heap.Init(&lc.lru)
+
 	start := time.Now()
-	log.Debugf("Purge running with cache size %d and low watermark of %d", lc.cacheSize, lc.lowWater)
+
+	// Purge recyclableHeap first
+	heap.Init(&lc.recyclableHeap)
+	log.Debugf("Purging recyclable objects first; cache size is %d, low watermark is %d", lc.cacheSize, lc.lowWater)
 	for lc.cacheSize > lc.lowWater {
-		if len(lc.lru) == 0 {
-			err = errors.New("purge ran until cache was empty")
-			log.Warningln("Potential consistency error: purge ran until cache was empty")
+		if len(lc.recyclableHeap) == 0 {
+			log.Debugln("Recyclable heap is empty, moving to main LRU heap")
 			break
 		}
-		entry := heap.Pop(&lc.lru).(*lruEntry)
+		entry := heap.Pop(&lc.recyclableHeap).(*lruEntry)
 		if entry == nil {
-			log.Warningln("Consistency error: purge run but no entry provided")
+			log.Warningln("Consistency error: purge ran but no entry provided")
 			continue
 		}
 		if entry.path == "" {
 			log.Warningln("Consistency error: purge ran on an empty path")
 			continue
 		}
+
 		localPath := path.Join(lc.basePath, path.Clean(entry.path))
 		if rmErr := os.Remove(localPath + ".DONE"); rmErr != nil {
 			log.Warningln("Failed to purge DONE file:", rmErr)
@@ -642,15 +750,72 @@ func (lc *LocalCache) purge() (err error) {
 			if err == nil {
 				err = rmErr
 			}
+		} else {
+			log.Debugf("Successfully purged file %s", localPath)
 		}
+
+		// Remove from lruHeap as well
+		if lruIndex := lc.getHeapIndex(entry, lc.lru); lruIndex != -1 {
+			heap.Remove(&lc.lru, lruIndex)
+			delete(lc.lruLookup, entry.path)
+			log.Debugf("Purged file %s from both recyclable and LRU heap", entry.path)
+		}
+
+		delete(lc.recyclableLookup, entry.path)
 		lc.cacheSize -= uint64(entry.size)
-		// Since purge is called from the mux thread, blocking can cause
-		// other failures; do a time-based break even if we've not hit the low-water
+
 		if time.Since(start) > 3*time.Second {
 			err = purgeTimeout
+			log.Warningln("Purge timeout while clearing recyclable objects")
+			return
+		}
+	}
+
+	// Now purge from the main LRU heap if lowWater is still not reached
+	heap.Init(&lc.lru)
+	log.Debugf("Purging main cache; cache size is %d, low watermark is %d", lc.cacheSize, lc.lowWater)
+	for lc.cacheSize > lc.lowWater {
+		if len(lc.lru) == 0 {
+			err = errors.New("purge ran until cache was empty")
+			log.Warningln("Potential consistency error: purge ran until cache was empty")
+			break
+		}
+		entry := heap.Pop(&lc.lru).(*lruEntry)
+		if entry == nil {
+			log.Warningln("Consistency error: purge ran but no entry provided")
+			continue
+		}
+		if entry.path == "" {
+			log.Warningln("Consistency error: purge ran on an empty path")
+			continue
+		}
+
+		localPath := path.Join(lc.basePath, path.Clean(entry.path))
+		if rmErr := os.Remove(localPath + ".DONE"); rmErr != nil {
+			log.Warningln("Failed to purge DONE file:", rmErr)
+			if err == nil {
+				err = rmErr
+			}
+		}
+		if rmErr := os.Remove(localPath); rmErr != nil {
+			log.Warningln("Failed to purge file:", rmErr)
+			if err == nil {
+				err = rmErr
+			}
+		} else {
+			log.Debugf("Successfully purged file %s", localPath)
+		}
+		delete(lc.lruLookup, entry.path)
+		lc.cacheSize -= uint64(entry.size)
+
+		// Ensure purge does not block for too long
+		if time.Since(start) > 3*time.Second {
+			err = purgeTimeout
+			log.Warningln("Purge timeout while clearing main LRU heap")
 			break
 		}
 	}
+
 	return
 }
 
@@ -911,4 +1076,51 @@ func (cr *cacheReader) readRaw(ctx context.Context, p []byte) (n int, err error)
 
 func (cr *cacheReader) Close() error {
 	return nil
+}
+
+func (lc *LocalCache) MoveToRecyclable(path string) (int, error) {
+	lc.mutex.Lock()
+	defer lc.mutex.Unlock()
+
+	entry, exists := lc.lruLookup[path]
+	if !exists {
+		log.Warningf("MoveToRecyclable: Object not found in cache (path: %s)", path)
+		return http.StatusNotFound, errors.New("object not found in cache")
+	}
+
+	// Check if already in recyclableHeap to prevent duplicates
+	if _, inRecyclable := lc.recyclableLookup[path]; inRecyclable {
+		log.Debugf("MoveToRecyclable: Object already in recyclable heap (path: %s)", path)
+		return http.StatusOK, nil
+	}
+
+	// Add to recyclable heap but DO NOT remove from lruHeap
+	lc.recyclableHeap = append(lc.recyclableHeap, entry)
+	lc.recyclableLookup[path] = entry
+	log.Infof("MoveToRecyclable: Object added to recyclable heap (path: %s)", path)
+
+	// Print full recyclableHeap contents
+	var heapEntries []string
+	for _, e := range lc.recyclableHeap {
+		heapEntries = append(heapEntries, fmt.Sprintf("{path: %s, size: %d, lastUse: %s}", e.path, e.size, e.lastUse))
+	}
+	log.Debugf("MoveToRecyclable: Current recyclableHeap: %v", heapEntries)
+
+	// Print full recyclableLookup contents
+	var lookupEntries []string
+	for k, v := range lc.recyclableLookup {
+		lookupEntries = append(lookupEntries, fmt.Sprintf("{path: %s, size: %d, lastUse: %s}", k, v.size, v.lastUse))
+	}
+	log.Debugf("MoveToRecyclable: Current recyclableLookup: %v", lookupEntries)
+
+	return http.StatusOK, nil
+}
+
+func (lc *LocalCache) getHeapIndex(entry *lruEntry, heapList lru) int {
+	for i, e := range heapList {
+		if e == entry {
+			return i
+		}
+	}
+	return -1 // Entry not found
 }
