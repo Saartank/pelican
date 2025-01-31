@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -31,6 +32,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -249,10 +251,9 @@ func NewLocalCache(ctx context.Context, egrp *errgroup.Group, options ...LocalCa
 		err = errors.New("LocalCache.DataLocation is not set; cannot determine where to place file cache's data")
 		return
 	}
-	if err = os.RemoveAll(cacheDir); err != nil {
-		return
-	}
-	if err = os.MkdirAll(cacheDir, os.FileMode(0700)); err != nil {
+
+	err = ensureDir(cacheDir)
+	if err != nil {
 		return
 	}
 
@@ -286,6 +287,7 @@ func NewLocalCache(ctx context.Context, egrp *errgroup.Group, options ...LocalCa
 		return nil, err
 	}
 
+	// Allocate lc and initialize all fields, including empty heaps and lookup maps
 	lc = &LocalCache{
 		ctx:              ctx,
 		egrp:             egrp,
@@ -301,6 +303,15 @@ func NewLocalCache(ctx context.Context, egrp *errgroup.Group, options ...LocalCa
 		directorURL:      directorUrl,
 		lruLookup:        make(map[string]*lruEntry),
 		recyclableLookup: make(map[string]*lruEntry),
+	}
+
+	// Initialize heaps before reconstructing cache
+	heap.Init(&lc.lru)
+	heap.Init(&lc.recyclableHeap)
+
+	// Reconstruct in-memory structures from sentinel files
+	if err := lc.ReconstructCache(); err != nil {
+		log.Warningf("Cache reconstruction failed: %v", err)
 	}
 
 	lc.tc, err = lc.te.NewClient(client.WithAcquireToken(false), client.WithCallback(lc.callback))
@@ -321,6 +332,38 @@ func NewLocalCache(ctx context.Context, egrp *errgroup.Group, options ...LocalCa
 
 	log.Debugln("Successfully created a new local cache object")
 	return
+}
+
+// ensureDir checks if the directory exists and is accessible (read, write, execute).
+// If it doesn't exist, it creates the directory with appropriate permissions.
+func ensureDir(cacheDir string) error {
+	info, err := os.Stat(cacheDir)
+	if err == nil {
+		// Directory exists, check if it's accessible
+		if info.IsDir() {
+			if info.Mode().Perm()&(os.ModePerm) != os.ModePerm {
+				err = errors.New("directory is not fully accessible (read/write/execute)")
+				log.WithError(err).Error("Directory permission issue")
+				return err
+			}
+			return nil // Directory is accessible
+		} else {
+			err = errors.New("path exists but is not a directory: " + cacheDir)
+			log.WithError(err).Error("Invalid directory path")
+			return err
+		}
+	} else if !os.IsNotExist(err) {
+		log.WithError(err).Error("Error checking directory")
+		return err
+	}
+
+	// Directory does not exist, create it
+	if err = os.MkdirAll(cacheDir, 0700); err != nil {
+		log.WithError(err).Error("Error creating directory")
+		return err
+	}
+
+	return nil
 }
 
 // Try to configure the local cache and launch the reconfigure goroutine
@@ -979,26 +1022,38 @@ func (cr *cacheReader) Close() error {
 	return nil
 }
 
-func (lc *LocalCache) MoveToRecyclable(path string) (int, error) {
+func (lc *LocalCache) MoveToRecyclable(objectPath string) (int, error) {
 	lc.mutex.Lock()
 	defer lc.mutex.Unlock()
 
-	entry, exists := lc.lruLookup[path]
+	entry, exists := lc.lruLookup[objectPath]
 	if !exists {
-		log.Warningf("MoveToRecyclable: Object not found in cache (path: %s)", path)
+		log.Warningf("MoveToRecyclable: Object not found in cache (path: %s)", objectPath)
 		return http.StatusNotFound, errors.New("object not found in cache")
 	}
 
 	// Check if already in recyclableHeap to prevent duplicates
-	if _, inRecyclable := lc.recyclableLookup[path]; inRecyclable {
-		log.Debugf("MoveToRecyclable: Object already in recyclable heap (path: %s)", path)
+	if _, inRecyclable := lc.recyclableLookup[objectPath]; inRecyclable {
+		log.Debugf("MoveToRecyclable: Object already in recyclable heap (path: %s)", objectPath)
 		return http.StatusOK, nil
 	}
 
 	// Add to recyclable heap but DO NOT remove from lruHeap
 	lc.recyclableHeap = append(lc.recyclableHeap, entry)
-	lc.recyclableLookup[path] = entry
-	log.Infof("MoveToRecyclable: Object added to recyclable heap (path: %s)", path)
+	lc.recyclableLookup[objectPath] = entry
+	log.Infof("MoveToRecyclable: Object added to recyclable heap (path: %s)", objectPath)
+
+	// Create sentinel file to mark it as recyclable
+	localPath := filepath.Join(lc.basePath, filepath.Clean(objectPath))
+	sentinelPath := localPath + ".PURGEABLE"
+
+	fp, err := os.OpenFile(sentinelPath, os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		log.Errorf("MoveToRecyclable: Failed to create sentinel file %s: %v", sentinelPath, err)
+		return http.StatusInternalServerError, errors.New("failed to create sentinel file")
+	}
+	fp.Close()
+	log.Debugf("MoveToRecyclable: Created sentinel file %s", sentinelPath)
 
 	// Print full recyclableHeap contents
 	var heapEntries []string
@@ -1024,4 +1079,95 @@ func (lc *LocalCache) getHeapIndex(entry *lruEntry, heapList lru) int {
 		}
 	}
 	return -1 // Entry not found
+}
+
+func (lc *LocalCache) ReconstructCache() error {
+	lc.mutex.Lock()
+	defer lc.mutex.Unlock()
+
+	log.Info("Reconstructing cache from sentinel files...")
+
+	// Reset in-memory structures
+	lc.lru = nil
+	lc.lruLookup = make(map[string]*lruEntry)
+	lc.recyclableHeap = nil
+	lc.recyclableLookup = make(map[string]*lruEntry)
+	lc.cacheSize = 0
+
+	// Scan basePath directory
+	err := filepath.WalkDir(lc.basePath, func(filePath string, d fs.DirEntry, err error) error {
+		if err != nil {
+			log.Errorf("Error scanning directory %s: %v", filePath, err)
+			return nil
+		}
+
+		// Check for sentinel files
+		if strings.HasSuffix(d.Name(), ".DONE") || strings.HasSuffix(d.Name(), ".PURGEABLE") {
+			dataFilePath := strings.TrimSuffix(filePath, filepath.Ext(filePath)) // Remove extension
+			fileInfo, err := os.Stat(dataFilePath)
+			if err != nil {
+				log.Warningf("File %s exists in sentinel but not on disk, skipping...", dataFilePath)
+				return nil
+			}
+
+			entry := &lruEntry{
+				path:    strings.TrimPrefix(dataFilePath, lc.basePath+"/"),
+				size:    fileInfo.Size(),
+				lastUse: fileInfo.ModTime(),
+			}
+
+			// Determine if it's recyclable or normal LRU
+			if strings.HasSuffix(d.Name(), ".PURGEABLE") {
+				lc.recyclableHeap = append(lc.recyclableHeap, entry)
+				lc.recyclableLookup[entry.path] = entry
+			} else if strings.HasSuffix(d.Name(), ".DONE") {
+				lc.lru = append(lc.lru, entry)
+				lc.lruLookup[entry.path] = entry
+			}
+
+			// Update cache size
+			lc.cacheSize += uint64(entry.size)
+		}
+
+		return nil
+	})
+
+	// Initialize heaps after loading entries
+	heap.Init(&lc.lru)
+	heap.Init(&lc.recyclableHeap)
+
+	if err != nil {
+		log.Errorf("Error reconstructing cache: %v", err)
+		return err
+	}
+
+	// Log the final reconstructed structures
+	var lruEntries []string
+	for _, e := range lc.lru {
+		lruEntries = append(lruEntries, fmt.Sprintf("{path: %s, size: %d, lastUse: %s}", e.path, e.size, e.lastUse))
+	}
+	log.Debugf("ReconstructCache: Final LRU heap: %v", lruEntries)
+
+	var lruLookupEntries []string
+	for k, v := range lc.lruLookup {
+		lruLookupEntries = append(lruLookupEntries, fmt.Sprintf("{path: %s, size: %d, lastUse: %s}", k, v.size, v.lastUse))
+	}
+	log.Debugf("ReconstructCache: Final LRU lookup: %v", lruLookupEntries)
+
+	var recyclableEntries []string
+	for _, e := range lc.recyclableHeap {
+		recyclableEntries = append(recyclableEntries, fmt.Sprintf("{path: %s, size: %d, lastUse: %s}", e.path, e.size, e.lastUse))
+	}
+	log.Debugf("ReconstructCache: Final recyclable heap: %v", recyclableEntries)
+
+	var recyclableLookupEntries []string
+	for k, v := range lc.recyclableLookup {
+		recyclableLookupEntries = append(recyclableLookupEntries, fmt.Sprintf("{path: %s, size: %d, lastUse: %s}", k, v.size, v.lastUse))
+	}
+	log.Debugf("ReconstructCache: Final recyclable lookup: %v", recyclableLookupEntries)
+
+	log.Infof("Reconstruction complete: %d cache entries, %d recyclable entries, total cache size: %d bytes",
+		len(lc.lru), len(lc.recyclableHeap), lc.cacheSize)
+
+	return nil
 }
