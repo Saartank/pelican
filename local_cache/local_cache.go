@@ -76,8 +76,8 @@ type (
 		lru       lru           // Manages a LRU of cache entries
 		lruLookup map[string]*lruEntry
 
-		recyclableHeap   lru
-		recyclableLookup map[string]*lruEntry
+		purgeFirstHeap   lru
+		purgeFirstLookup map[string]*lruEntry
 
 		cacheSize uint64 // Total cache size
 	}
@@ -302,12 +302,12 @@ func NewLocalCache(ctx context.Context, egrp *errgroup.Group, options ...LocalCa
 		sizeReq:          make(chan availSizeReq),
 		directorURL:      directorUrl,
 		lruLookup:        make(map[string]*lruEntry),
-		recyclableLookup: make(map[string]*lruEntry),
+		purgeFirstLookup: make(map[string]*lruEntry),
 	}
 
 	// Initialize heaps before reconstructing cache
 	heap.Init(&lc.lru)
-	heap.Init(&lc.recyclableHeap)
+	heap.Init(&lc.purgeFirstHeap)
 
 	// Reconstruct in-memory structures from sentinel files
 	if err := lc.ReconstructCache(); err != nil {
@@ -341,12 +341,16 @@ func ensureDir(cacheDir string) error {
 	if err == nil {
 		// Directory exists, check if it's accessible
 		if info.IsDir() {
-			if info.Mode().Perm()&(os.ModePerm) != os.ModePerm {
-				err = errors.New("directory is not fully accessible (read/write/execute)")
+			testFile := filepath.Join(cacheDir, ".perm_test")
+			file, err := os.Create(testFile)
+			if err != nil {
+				err = errors.New("directory is not fully accessible (write permission missing)")
 				log.WithError(err).Error("Directory permission issue")
 				return err
 			}
-			return nil // Directory is accessible
+			file.Close()
+			os.Remove(testFile)
+			return nil
 		} else {
 			err = errors.New("path exists but is not a directory: " + cacheDir)
 			log.WithError(err).Error("Invalid directory path")
@@ -664,15 +668,15 @@ func (lc *LocalCache) purge() (err error) {
 
 	start := time.Now()
 
-	// Purge recyclableHeap first
-	heap.Init(&lc.recyclableHeap)
-	log.Debugf("Purging recyclable objects first; cache size is %d, low watermark is %d", lc.cacheSize, lc.lowWater)
+	// Purge purgeFirstHeap first
+	heap.Init(&lc.purgeFirstHeap)
+	log.Debugf("Purging `PURGEFIRST` objects first; cache size is %d, low watermark is %d", lc.cacheSize, lc.lowWater)
 	for lc.cacheSize > lc.lowWater {
-		if len(lc.recyclableHeap) == 0 {
-			log.Debugln("Recyclable heap is empty, moving to main LRU heap")
+		if len(lc.purgeFirstHeap) == 0 {
+			log.Debugln("Purge first heap is empty, moving to main LRU heap")
 			break
 		}
-		entry := heap.Pop(&lc.recyclableHeap).(*lruEntry)
+		entry := heap.Pop(&lc.purgeFirstHeap).(*lruEntry)
 		if entry == nil {
 			log.Warningln("Consistency error: purge ran but no entry provided")
 			continue
@@ -702,15 +706,15 @@ func (lc *LocalCache) purge() (err error) {
 		if lruIndex := lc.getHeapIndex(entry, lc.lru); lruIndex != -1 {
 			heap.Remove(&lc.lru, lruIndex)
 			delete(lc.lruLookup, entry.path)
-			log.Debugf("Purged file %s from both recyclable and LRU heap", entry.path)
+			log.Debugf("Purged file %s from both purge first and LRU heap", entry.path)
 		}
 
-		delete(lc.recyclableLookup, entry.path)
+		delete(lc.purgeFirstLookup, entry.path)
 		lc.cacheSize -= uint64(entry.size)
 
 		if time.Since(start) > 3*time.Second {
 			err = purgeTimeout
-			log.Warningln("Purge timeout while clearing recyclable objects")
+			log.Warningln("Purge timeout while clearing purge first objects")
 			return
 		}
 	}
@@ -1022,52 +1026,51 @@ func (cr *cacheReader) Close() error {
 	return nil
 }
 
-func (lc *LocalCache) MoveToRecyclable(objectPath string) (int, error) {
+func (lc *LocalCache) MarkObjectPurgeFirst(objectPath string) (int, error) {
 	lc.mutex.Lock()
 	defer lc.mutex.Unlock()
 
 	entry, exists := lc.lruLookup[objectPath]
 	if !exists {
-		log.Warningf("MoveToRecyclable: Object not found in cache (path: %s)", objectPath)
+		log.Warningf("Object not found in cache (path: %s)", objectPath)
 		return http.StatusNotFound, errors.New("object not found in cache")
 	}
 
-	// Check if already in recyclableHeap to prevent duplicates
-	if _, inRecyclable := lc.recyclableLookup[objectPath]; inRecyclable {
-		log.Debugf("MoveToRecyclable: Object already in recyclable heap (path: %s)", objectPath)
+	// Check if already in purgeFirstHeap to prevent duplicates
+	if _, isPurgeFirst := lc.purgeFirstLookup[objectPath]; isPurgeFirst {
+		log.Debugf("Object already in purge first heap (path: %s)", objectPath)
 		return http.StatusOK, nil
 	}
 
-	// Add to recyclable heap but DO NOT remove from lruHeap
-	lc.recyclableHeap = append(lc.recyclableHeap, entry)
-	lc.recyclableLookup[objectPath] = entry
-	log.Infof("MoveToRecyclable: Object added to recyclable heap (path: %s)", objectPath)
+	// Add to purge first heap but DO NOT remove from lruHeap
+	lc.purgeFirstHeap = append(lc.purgeFirstHeap, entry)
+	lc.purgeFirstLookup[objectPath] = entry
 
-	// Create sentinel file to mark it as recyclable
+	// Create sentinel file to mark it as purge first
 	localPath := filepath.Join(lc.basePath, filepath.Clean(objectPath))
-	sentinelPath := localPath + ".PURGEABLE"
+	sentinelPath := localPath + ".PURGEFIRST"
 
 	fp, err := os.OpenFile(sentinelPath, os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
-		log.Errorf("MoveToRecyclable: Failed to create sentinel file %s: %v", sentinelPath, err)
+		log.Errorf("Failed to create sentinel file %s: %v", sentinelPath, err)
 		return http.StatusInternalServerError, errors.New("failed to create sentinel file")
 	}
 	fp.Close()
-	log.Debugf("MoveToRecyclable: Created sentinel file %s", sentinelPath)
+	log.Debugf("Created sentinel file %s", sentinelPath)
 
-	// Print full recyclableHeap contents
+	// Print full purgeFirstHeap contents
 	var heapEntries []string
-	for _, e := range lc.recyclableHeap {
+	for _, e := range lc.purgeFirstHeap {
 		heapEntries = append(heapEntries, fmt.Sprintf("{path: %s, size: %d, lastUse: %s}", e.path, e.size, e.lastUse))
 	}
-	log.Debugf("MoveToRecyclable: Current recyclableHeap: %v", heapEntries)
+	log.Debugf("Current purgeFirstHeap: %v", heapEntries)
 
-	// Print full recyclableLookup contents
+	// Print full purgeFirstLookup contents
 	var lookupEntries []string
-	for k, v := range lc.recyclableLookup {
+	for k, v := range lc.purgeFirstLookup {
 		lookupEntries = append(lookupEntries, fmt.Sprintf("{path: %s, size: %d, lastUse: %s}", k, v.size, v.lastUse))
 	}
-	log.Debugf("MoveToRecyclable: Current recyclableLookup: %v", lookupEntries)
+	log.Debugf("Current purgeFirstLookup: %v", lookupEntries)
 
 	return http.StatusOK, nil
 }
@@ -1090,8 +1093,8 @@ func (lc *LocalCache) ReconstructCache() error {
 	// Reset in-memory structures
 	lc.lru = nil
 	lc.lruLookup = make(map[string]*lruEntry)
-	lc.recyclableHeap = nil
-	lc.recyclableLookup = make(map[string]*lruEntry)
+	lc.purgeFirstHeap = nil
+	lc.purgeFirstLookup = make(map[string]*lruEntry)
 	lc.cacheSize = 0
 
 	// Scan basePath directory
@@ -1102,7 +1105,7 @@ func (lc *LocalCache) ReconstructCache() error {
 		}
 
 		// Check for sentinel files
-		if strings.HasSuffix(d.Name(), ".DONE") || strings.HasSuffix(d.Name(), ".PURGEABLE") {
+		if strings.HasSuffix(d.Name(), ".DONE") || strings.HasSuffix(d.Name(), ".PURGEFIRST") {
 			dataFilePath := strings.TrimSuffix(filePath, filepath.Ext(filePath)) // Remove extension
 			fileInfo, err := os.Stat(dataFilePath)
 			if err != nil {
@@ -1111,15 +1114,15 @@ func (lc *LocalCache) ReconstructCache() error {
 			}
 
 			entry := &lruEntry{
-				path:    strings.TrimPrefix(dataFilePath, lc.basePath+"/"),
+				path:    strings.TrimPrefix(dataFilePath, lc.basePath),
 				size:    fileInfo.Size(),
 				lastUse: fileInfo.ModTime(),
 			}
 
-			// Determine if it's recyclable or normal LRU
-			if strings.HasSuffix(d.Name(), ".PURGEABLE") {
-				lc.recyclableHeap = append(lc.recyclableHeap, entry)
-				lc.recyclableLookup[entry.path] = entry
+			// Determine if it's purge first or normal LRU
+			if strings.HasSuffix(d.Name(), ".PURGEFIRST") {
+				lc.purgeFirstHeap = append(lc.purgeFirstHeap, entry)
+				lc.purgeFirstLookup[entry.path] = entry
 			} else if strings.HasSuffix(d.Name(), ".DONE") {
 				lc.lru = append(lc.lru, entry)
 				lc.lruLookup[entry.path] = entry
@@ -1134,7 +1137,7 @@ func (lc *LocalCache) ReconstructCache() error {
 
 	// Initialize heaps after loading entries
 	heap.Init(&lc.lru)
-	heap.Init(&lc.recyclableHeap)
+	heap.Init(&lc.purgeFirstHeap)
 
 	if err != nil {
 		log.Errorf("Error reconstructing cache: %v", err)
@@ -1146,28 +1149,28 @@ func (lc *LocalCache) ReconstructCache() error {
 	for _, e := range lc.lru {
 		lruEntries = append(lruEntries, fmt.Sprintf("{path: %s, size: %d, lastUse: %s}", e.path, e.size, e.lastUse))
 	}
-	log.Debugf("ReconstructCache: Final LRU heap: %v", lruEntries)
+	log.Debugf("Final LRU heap: %v", lruEntries)
 
 	var lruLookupEntries []string
 	for k, v := range lc.lruLookup {
 		lruLookupEntries = append(lruLookupEntries, fmt.Sprintf("{path: %s, size: %d, lastUse: %s}", k, v.size, v.lastUse))
 	}
-	log.Debugf("ReconstructCache: Final LRU lookup: %v", lruLookupEntries)
+	log.Debugf("Final LRU lookup: %v", lruLookupEntries)
 
-	var recyclableEntries []string
-	for _, e := range lc.recyclableHeap {
-		recyclableEntries = append(recyclableEntries, fmt.Sprintf("{path: %s, size: %d, lastUse: %s}", e.path, e.size, e.lastUse))
+	var purgeFirstEntries []string
+	for _, e := range lc.purgeFirstHeap {
+		purgeFirstEntries = append(purgeFirstEntries, fmt.Sprintf("{path: %s, size: %d, lastUse: %s}", e.path, e.size, e.lastUse))
 	}
-	log.Debugf("ReconstructCache: Final recyclable heap: %v", recyclableEntries)
+	log.Debugf("Final purge first heap: %v", purgeFirstEntries)
 
-	var recyclableLookupEntries []string
-	for k, v := range lc.recyclableLookup {
-		recyclableLookupEntries = append(recyclableLookupEntries, fmt.Sprintf("{path: %s, size: %d, lastUse: %s}", k, v.size, v.lastUse))
+	var purgeFirstLookupEntries []string
+	for k, v := range lc.purgeFirstLookup {
+		purgeFirstLookupEntries = append(purgeFirstLookupEntries, fmt.Sprintf("{path: %s, size: %d, lastUse: %s}", k, v.size, v.lastUse))
 	}
-	log.Debugf("ReconstructCache: Final recyclable lookup: %v", recyclableLookupEntries)
+	log.Debugf("Final purge first lookup: %v", purgeFirstLookupEntries)
 
-	log.Infof("Reconstruction complete: %d cache entries, %d recyclable entries, total cache size: %d bytes",
-		len(lc.lru), len(lc.recyclableHeap), lc.cacheSize)
+	log.Infof("Reconstruction complete: %d cache entries, %d purge first entries, total cache size: %d bytes",
+		len(lc.lru), len(lc.purgeFirstHeap), lc.cacheSize)
 
 	return nil
 }
