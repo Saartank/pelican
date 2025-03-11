@@ -392,7 +392,12 @@ func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.L
 	if err != nil {
 		return
 	}
-	callbackReq := callbackRequest{RequestId: brokerResp.RequestId}
+	originUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+	if err != nil {
+		return
+	}
+	serverNs := "/origins/" + originUrl.Host
+	callbackReq := callbackRequest{RequestId: brokerResp.RequestId, OriginNs: serverNs}
 	reqBytes, err := json.Marshal(&callbackReq)
 	if err != nil {
 		return
@@ -414,8 +419,7 @@ func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.L
 		return
 	}
 	cacheAud.Path = ""
-
-	token, err := createToken(param.Origin_FederationPrefix.GetString(), param.Server_Hostname.GetString(), cacheAud.String(), token_scopes.Broker_Callback)
+	token, err := createToken(serverNs, param.Server_Hostname.GetString(), cacheAud.String(), token_scopes.Broker_Callback)
 	if err != nil {
 		err = errors.Wrap(err, "failure when constructing the cache callback token")
 		return
@@ -565,9 +569,11 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan 
 	if err != nil {
 		return
 	}
+	serverNs := "/origins/" + originUrl.Host
 	oReq := originRequest{
-		Origin: originUrl.Hostname(),
-		Prefix: param.Origin_FederationPrefix.GetString(),
+		Origin:   originUrl.Hostname(),
+		Prefix:   param.Origin_FederationPrefix.GetString(),
+		ServerNs: serverNs,
 	}
 	req, err := json.Marshal(&oReq)
 	if err != nil {
@@ -602,7 +608,7 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan 
 				}
 				brokerAud.Path = ""
 
-				token, err := createToken(param.Origin_FederationPrefix.GetString(), param.Server_Hostname.GetString(), brokerAud.String(), token_scopes.Broker_Retrieve)
+				token, err := createToken(serverNs, param.Server_Hostname.GetString(), brokerAud.String(), token_scopes.Broker_Retrieve)
 				if err != nil {
 					log.Errorln("Failure when constructing the broker retrieve token:", err)
 					break

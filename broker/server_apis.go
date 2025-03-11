@@ -37,8 +37,9 @@ type (
 
 	// Structure for an origin's POST to the broker
 	originRequest struct {
-		Origin string `json:"origin"`
-		Prefix string `json:"prefix"`
+		Origin   string `json:"origin"`
+		Prefix   string `json:"prefix"`
+		ServerNs string `json:"server_ns"`
 	}
 
 	// Response for a successful retrieval
@@ -50,6 +51,7 @@ type (
 	// Structure for an origin calling back to the cache
 	callbackRequest struct {
 		RequestId string `json:"request_id"`
+		OriginNs  string `json:"origin_ns"`
 	}
 )
 
@@ -98,7 +100,7 @@ func retrieveRequest(ctx context.Context, ginCtx *gin.Context) {
 		return
 	}
 
-	ok, err := verifyToken(ctx, token, originReq.Prefix, param.Server_ExternalWebUrl.GetString(), token_scopes.Broker_Retrieve)
+	ok, err := verifyToken(ctx, token, originReq.ServerNs, param.Server_ExternalWebUrl.GetString(), token_scopes.Broker_Retrieve)
 	if err != nil {
 		log.Errorln("Failed to verify token for reverse request:", err)
 		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, newBrokerRespFail("Failed to verify provided token"))
@@ -215,7 +217,7 @@ func handleCallback(ctx context.Context, ginCtx *gin.Context) {
 		return
 	}
 
-	ok, err := verifyToken(ctx, token, pendingRev.prefix, param.Server_ExternalWebUrl.GetString(), token_scopes.Broker_Callback)
+	ok, err := verifyToken(ctx, token, callbackReq.OriginNs, param.Server_ExternalWebUrl.GetString(), token_scopes.Broker_Callback)
 	if err != nil {
 		log.Errorln("Failed to verify token for cache callback:", err)
 		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, newBrokerRespFail("Failed to verify provided token"))
