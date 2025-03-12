@@ -1960,6 +1960,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		transferUrl.Host = "localhost"
 	}
 	httpClient, ok := client.HTTPClient.(*http.Client)
+
 	if !ok {
 		return 0, 0, -1, "", errors.New("Internal error: implementation is not a http.Client type")
 	}
@@ -1970,6 +1971,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	} else {
 		headerTimeout /= 2
 	}
+	httpClient.Timeout = 10 * time.Minute
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

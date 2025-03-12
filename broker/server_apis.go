@@ -20,6 +20,7 @@ package broker
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -74,6 +75,7 @@ func newBrokerRespTimeout() (result brokerRetrievalResp) {
 }
 
 func retrieveRequest(ctx context.Context, ginCtx *gin.Context) {
+	fmt.Println("YOYOYO retrieveRequest hit!")
 	timeoutStr := "5s"
 	if val := ginCtx.Request.Header.Get("X-Pelican-Timeout"); val != "" {
 		timeoutStr = val
@@ -112,6 +114,7 @@ func retrieveRequest(ctx context.Context, ginCtx *gin.Context) {
 
 	req, err := handleRetrieve(ctx, ginCtx, originReq.Prefix, originReq.Origin, timeoutVal)
 	if errors.Is(err, errRetrieveTimeout) {
+		fmt.Println("YOYOYOYOY: Sending back timeout from the retrieve request")
 		ginCtx.JSON(http.StatusOK, newBrokerRespTimeout())
 		return
 	} else if err != nil {
@@ -119,6 +122,7 @@ func retrieveRequest(ctx context.Context, ginCtx *gin.Context) {
 		return
 	}
 
+	fmt.Println("YOYOYOYOY: Sending back OK resp - Redirect from the retrieve request")
 	ginCtx.JSON(http.StatusOK, newBrokerReqResp(req))
 }
 

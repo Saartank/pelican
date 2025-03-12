@@ -20,11 +20,13 @@ package origin
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -34,6 +36,7 @@ import (
 	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
@@ -97,12 +100,14 @@ func proxyOrigin(resp http.ResponseWriter, req *http.Request) {
 // Launch goroutines that continuously poll the broker
 func LaunchBrokerListener(ctx context.Context, egrp *errgroup.Group) (err error) {
 	listenerChan := make(chan any)
-	// Startup 5 continuous polling routines
-	for cnt := 0; cnt < 5; cnt += 1 {
+	originExports, err := server_utils.GetOriginExports()
+	for cnt := 0; cnt < len(originExports)*5; cnt += 1 {
 		err = broker.LaunchRequestMonitor(ctx, egrp, listenerChan)
 		if err != nil {
 			return
 		}
+		fmt.Println("YOYOYOYO sleeping for: 5s")
+		time.Sleep(5 * time.Second)
 	}
 	// Start routine which receives the reverse listener and then launches
 	// a simple proxying HTTPS server for that connection

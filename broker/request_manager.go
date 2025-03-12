@@ -21,6 +21,7 @@ package broker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand"
 	"sync"
 	"time"
@@ -91,6 +92,7 @@ func handleRequest(ctx context.Context, origin string, req reversalRequest, time
 
 // Handle the origin's request to retrieve any pending reversals.
 func handleRetrieve(appCtx context.Context, ginCtx context.Context, prefix, origin string, timeout time.Duration) (req reversalRequest, err error) {
+	fmt.Println("YOYOYOY: using prefix: ", prefix, " And origin: ", origin)
 	// Return randomly short of the timeout.
 	maxTime := timeout - 500*time.Millisecond - time.Duration(rand.Intn(500))*time.Millisecond
 	if maxTime <= 0 {
