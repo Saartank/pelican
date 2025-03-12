@@ -671,6 +671,147 @@ func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.L
 // 	return nil
 // }
 
+// func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan chan any) error {
+// 	fedInfo, err := config.GetFederation(ctx)
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	brokerUrl := fedInfo.BrokerEndpoint
+// 	if brokerUrl == "" {
+// 		return errors.New("Broker service is not set or discovered; cannot enable broker functionality. Try setting Federation.BrokerUrl")
+// 	}
+
+// 	brokerEndpoint := brokerUrl + "/api/v1.0/broker/retrieve"
+// 	originUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+// 	if err != nil {
+// 		return err
+// 	}
+// 	serverNs := "/origins/" + originUrl.Host
+
+// 	// Retrieve all exports
+// 	originExports, err := server_utils.GetOriginExports()
+// 	if err != nil {
+// 		return err
+// 	}
+// 	egrp.Go(func() error {
+// 		sleepDuration := time.Second
+// 		for {
+// 			select {
+// 			case <-ctx.Done():
+// 				return ctx.Err()
+// 			default:
+// 				allRequestsFailed := true // Track if every request in this iteration failed
+
+// 				for _, export := range originExports {
+
+// 					oReq := originRequest{
+// 						Origin:   originUrl.Hostname(),
+// 						Prefix:   export.FederationPrefix,
+// 						ServerNs: serverNs,
+// 					}
+
+// 					reqBytes, err := json.Marshal(&oReq)
+// 					if err != nil {
+// 						log.Errorln("JSON Marshal error:", err)
+// 						continue
+// 					}
+
+// 					reqReader := bytes.NewReader(reqBytes)
+// 					req, err := http.NewRequestWithContext(ctx, http.MethodPost, brokerEndpoint, reqReader)
+// 					if err != nil {
+// 						log.Errorln("Failed to create broker request:", err)
+// 						continue
+// 					}
+
+// 					dur := param.Transport_ResponseHeaderTimeout.GetDuration() - time.Duration(mrand.Intn(500))*time.Millisecond
+// 					req.Header.Set("X-Pelican-Timeout", dur.String())
+// 					req.Header.Set("Content-Type", "application/json")
+// 					req.Header.Set("User-Agent", "pelican-origin/"+config.GetVersion())
+
+// 					// ✅ Ensure the broker audience URL is correctly parsed
+// 					brokerAud, err := url.Parse(fedInfo.BrokerEndpoint)
+// 					if err != nil {
+// 						log.Errorln("Failed to parse broker URL:", err)
+// 						continue
+// 					}
+// 					brokerAud.Path = ""
+
+// 					// ✅ Ensure a fresh token is created for every request
+// 					token, err := createToken(serverNs, param.Server_Hostname.GetString(), brokerAud.String(), token_scopes.Broker_Retrieve)
+// 					if err != nil {
+// 						log.Errorln("Failed to construct broker retrieve token:", err)
+// 						continue
+// 					}
+
+// 					req.Header.Set("Authorization", "Bearer "+token)
+
+// 					client := &http.Client{Transport: config.GetTransport()}
+// 					resp, err := client.Do(req)
+// 					if err != nil {
+// 						log.Errorln("Broker request failed:", err)
+// 						continue
+// 					}
+// 					defer resp.Body.Close()
+
+// 					responseBytes, err := io.ReadAll(resp.Body)
+// 					if err != nil {
+// 						log.Errorln("Failure when reading from broker response:", err)
+// 						continue
+// 					}
+
+// 					if resp.StatusCode == 401 {
+// 						log.Errorln("YOYOYOYOYO ERROR: Received 401 Unauthorized. Token might be invalid or expired.")
+// 						continue
+// 					}
+
+// 					if resp.StatusCode >= 400 {
+// 						log.Errorf("Broker returned error (status: %d)", resp.StatusCode)
+// 						continue
+// 					}
+
+// 					brokerResp := &brokerRetrievalResp{}
+// 					err = json.Unmarshal(responseBytes, brokerResp)
+// 					if err != nil {
+// 						log.Errorf("Failed to unmarshal response: %v. Response body: %s", err, string(responseBytes))
+// 						continue
+// 					}
+
+// 					if brokerResp.Status == server_structs.RespOK {
+// 						listener, err := doCallback(ctx, brokerResp.Request)
+// 						if err != nil {
+// 							log.Errorln("Failed to callback to the cache:", err)
+// 							resultChan <- err
+// 							continue
+// 						}
+// 						resultChan <- listener
+// 					} else if brokerResp.Status == server_structs.RespFailed {
+// 						log.Errorln("Broker error:", brokerResp.Msg)
+// 					} else if brokerResp.Status != server_structs.RespPollTimeout {
+// 						log.Errorf("Unexpected broker response: %s", brokerResp.Status)
+// 					}
+// 					allRequestsFailed = false
+// 				}
+
+// 				// ✅ Increase sleep time only if all requests failed
+// 				if allRequestsFailed {
+// 					sleepDuration *= 2
+// 					if sleepDuration > time.Minute {
+// 						sleepDuration = time.Minute
+// 					}
+// 					log.Warnf("All requests failed, increasing sleep time to %s", sleepDuration)
+// 				} else {
+// 					sleepDuration = time.Second // ✅ Reset sleep duration on success
+// 				}
+
+// 				time.Sleep(sleepDuration)
+// 			}
+// 		}
+// 	})
+
+// 	return nil
+// }
+
 func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan chan any) error {
 	fedInfo, err := config.GetFederation(ctx)
 	if err != nil {
@@ -701,112 +842,112 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan 
 			case <-ctx.Done():
 				return ctx.Err()
 			default:
-				allRequestsFailed := true // Track if every request in this iteration failed
+				// allRequestsFailed := true // Track if every request in this iteration failed
 
-				for _, export := range originExports {
+				// for _, export := range originExports {
 
-					oReq := originRequest{
-						Origin:   originUrl.Hostname(),
-						Prefix:   export.FederationPrefix,
-						ServerNs: serverNs,
-					}
-
-					reqBytes, err := json.Marshal(&oReq)
-					if err != nil {
-						log.Errorln("JSON Marshal error:", err)
-						continue
-					}
-
-					reqReader := bytes.NewReader(reqBytes)
-					req, err := http.NewRequestWithContext(ctx, http.MethodPost, brokerEndpoint, reqReader)
-					if err != nil {
-						log.Errorln("Failed to create broker request:", err)
-						continue
-					}
-
-					dur := param.Transport_ResponseHeaderTimeout.GetDuration() - time.Duration(mrand.Intn(500))*time.Millisecond
-					req.Header.Set("X-Pelican-Timeout", dur.String())
-					req.Header.Set("Content-Type", "application/json")
-					req.Header.Set("User-Agent", "pelican-origin/"+config.GetVersion())
-
-					// ✅ Ensure the broker audience URL is correctly parsed
-					brokerAud, err := url.Parse(fedInfo.BrokerEndpoint)
-					if err != nil {
-						log.Errorln("Failed to parse broker URL:", err)
-						continue
-					}
-					brokerAud.Path = ""
-
-					// ✅ Ensure a fresh token is created for every request
-					token, err := createToken(serverNs, param.Server_Hostname.GetString(), brokerAud.String(), token_scopes.Broker_Retrieve)
-					if err != nil {
-						log.Errorln("Failed to construct broker retrieve token:", err)
-						continue
-					}
-
-					req.Header.Set("Authorization", "Bearer "+token)
-
-					client := &http.Client{Transport: config.GetTransport()}
-					resp, err := client.Do(req)
-					if err != nil {
-						log.Errorln("Broker request failed:", err)
-						continue
-					}
-					defer resp.Body.Close()
-
-					responseBytes, err := io.ReadAll(resp.Body)
-					if err != nil {
-						log.Errorln("Failure when reading from broker response:", err)
-						continue
-					}
-
-					if resp.StatusCode == 401 {
-						log.Errorln("YOYOYOYOYO ERROR: Received 401 Unauthorized. Token might be invalid or expired.")
-						continue
-					}
-
-					if resp.StatusCode >= 400 {
-						log.Errorf("Broker returned error (status: %d)", resp.StatusCode)
-						continue
-					}
-
-					brokerResp := &brokerRetrievalResp{}
-					err = json.Unmarshal(responseBytes, brokerResp)
-					if err != nil {
-						log.Errorf("Failed to unmarshal response: %v. Response body: %s", err, string(responseBytes))
-						continue
-					}
-
-					if brokerResp.Status == server_structs.RespOK {
-						listener, err := doCallback(ctx, brokerResp.Request)
-						if err != nil {
-							log.Errorln("Failed to callback to the cache:", err)
-							resultChan <- err
-							continue
-						}
-						resultChan <- listener
-					} else if brokerResp.Status == server_structs.RespFailed {
-						log.Errorln("Broker error:", brokerResp.Msg)
-					} else if brokerResp.Status != server_structs.RespPollTimeout {
-						log.Errorf("Unexpected broker response: %s", brokerResp.Status)
-					}
-					allRequestsFailed = false
+				oReq := originRequest{
+					Origin:   originUrl.Hostname(),
+					Prefix:   originExports[0].FederationPrefix,
+					ServerNs: serverNs,
 				}
 
-				// ✅ Increase sleep time only if all requests failed
-				if allRequestsFailed {
-					sleepDuration *= 2
-					if sleepDuration > time.Minute {
-						sleepDuration = time.Minute
-					}
-					log.Warnf("All requests failed, increasing sleep time to %s", sleepDuration)
-				} else {
-					sleepDuration = time.Second // ✅ Reset sleep duration on success
+				reqBytes, err := json.Marshal(&oReq)
+				if err != nil {
+					log.Errorln("JSON Marshal error:", err)
+					continue
 				}
 
-				time.Sleep(sleepDuration)
+				reqReader := bytes.NewReader(reqBytes)
+				req, err := http.NewRequestWithContext(ctx, http.MethodPost, brokerEndpoint, reqReader)
+				if err != nil {
+					log.Errorln("Failed to create broker request:", err)
+					continue
+				}
+
+				dur := param.Transport_ResponseHeaderTimeout.GetDuration() - time.Duration(mrand.Intn(500))*time.Millisecond
+				req.Header.Set("X-Pelican-Timeout", dur.String())
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("User-Agent", "pelican-origin/"+config.GetVersion())
+
+				// ✅ Ensure the broker audience URL is correctly parsed
+				brokerAud, err := url.Parse(fedInfo.BrokerEndpoint)
+				if err != nil {
+					log.Errorln("Failed to parse broker URL:", err)
+					continue
+				}
+				brokerAud.Path = ""
+
+				// ✅ Ensure a fresh token is created for every request
+				token, err := createToken(serverNs, param.Server_Hostname.GetString(), brokerAud.String(), token_scopes.Broker_Retrieve)
+				if err != nil {
+					log.Errorln("Failed to construct broker retrieve token:", err)
+					continue
+				}
+
+				req.Header.Set("Authorization", "Bearer "+token)
+
+				client := &http.Client{Transport: config.GetTransport()}
+				resp, err := client.Do(req)
+				if err != nil {
+					log.Errorln("Broker request failed:", err)
+					continue
+				}
+				defer resp.Body.Close()
+
+				responseBytes, err := io.ReadAll(resp.Body)
+				if err != nil {
+					log.Errorln("Failure when reading from broker response:", err)
+					continue
+				}
+
+				if resp.StatusCode == 401 {
+					log.Errorln("YOYOYOYOYO ERROR: Received 401 Unauthorized. Token might be invalid or expired.")
+					continue
+				}
+
+				if resp.StatusCode >= 400 {
+					log.Errorf("Broker returned error (status: %d)", resp.StatusCode)
+					continue
+				}
+
+				brokerResp := &brokerRetrievalResp{}
+				err = json.Unmarshal(responseBytes, brokerResp)
+				if err != nil {
+					log.Errorf("Failed to unmarshal response: %v. Response body: %s", err, string(responseBytes))
+					continue
+				}
+
+				if brokerResp.Status == server_structs.RespOK {
+					listener, err := doCallback(ctx, brokerResp.Request)
+					if err != nil {
+						log.Errorln("Failed to callback to the cache:", err)
+						resultChan <- err
+						continue
+					}
+					resultChan <- listener
+				} else if brokerResp.Status == server_structs.RespFailed {
+					log.Errorln("Broker error:", brokerResp.Msg)
+				} else if brokerResp.Status != server_structs.RespPollTimeout {
+					log.Errorf("Unexpected broker response: %s", brokerResp.Status)
+				}
+				// allRequestsFailed = false
 			}
+
+			// ✅ Increase sleep time only if all requests failed
+			// if allRequestsFailed {
+			// 	sleepDuration *= 2
+			// 	if sleepDuration > time.Minute {
+			// 		sleepDuration = time.Minute
+			// 	}
+			// 	log.Warnf("All requests failed, increasing sleep time to %s", sleepDuration)
+			// } else {
+			// 	sleepDuration = time.Second // ✅ Reset sleep duration on success
+			// }
+
+			time.Sleep(sleepDuration)
 		}
+		// }
 	})
 
 	return nil

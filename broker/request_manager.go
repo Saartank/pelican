@@ -38,12 +38,10 @@ type (
 
 	requestInfo struct {
 		channel chan reversalRequest
-		prefix  string
 	}
 
 	requestKey struct {
 		origin string
-		prefix string
 	}
 )
 
@@ -57,11 +55,11 @@ var (
 func getOriginQueue(prefix, origin string) chan reversalRequest {
 	requestsLock.Lock()
 	defer requestsLock.Unlock()
-	if req, ok := requests[requestKey{origin: origin, prefix: prefix}]; ok {
+	if req, ok := requests[requestKey{origin: origin}]; ok {
 		return req.channel
 	} else {
 		newChan := make(chan reversalRequest)
-		requests[requestKey{origin: origin, prefix: prefix}] = requestInfo{channel: newChan, prefix: prefix}
+		requests[requestKey{origin: origin}] = requestInfo{channel: newChan}
 		return newChan
 	}
 }
