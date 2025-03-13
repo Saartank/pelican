@@ -42,7 +42,7 @@ import (
 type (
 	xrootdBrokerRequest struct {
 		BrokerURL  string `json:"broker_url"`
-		OriginName string `json:"origin"`
+		OriginHost string `json:"origin"`
 		Prefix     string `json:"prefix"`
 		err        error
 	}
@@ -121,7 +121,7 @@ func handleRequest(ctx context.Context, xrdConn net.Conn) {
 			sendXrootdError(xrdConn, errStr)
 			return
 		}
-		newConn, err := broker.ConnectToOrigin(ctx, xrdReq.BrokerURL, xrdReq.Prefix, xrdReq.OriginName)
+		newConn, err := broker.ConnectToOrigin(ctx, xrdReq.BrokerURL, xrdReq.OriginHost)
 		if err != nil {
 			errStr := "Failure when getting connection reversal from origin: " + err.Error()
 			log.Warning(errStr)
