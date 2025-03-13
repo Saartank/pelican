@@ -43,7 +43,6 @@ type (
 	xrootdBrokerRequest struct {
 		BrokerURL  string `json:"broker_url"`
 		OriginHost string `json:"origin"`
-		Prefix     string `json:"prefix"`
 		err        error
 	}
 

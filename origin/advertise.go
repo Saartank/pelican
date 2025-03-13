@@ -175,9 +175,6 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 		brokerUrl.Path = "/api/v1.0/broker/reverse"
 		values := brokerUrl.Query()
 		values.Set("origin", originUrl.Host)
-
-		// This is not used but is needed for backward compatibility with xrdcl Pelican
-		values.Set("prefix", prefixes[0])
 		brokerUrl.RawQuery = values.Encode()
 		ad.BrokerURL = brokerUrl.String()
 	}
